@@ -78,19 +78,22 @@ z-buffer в setCell работает — ближний символ вытес�
 
 ---
 
-## Этап 4 — Сцена, примитивы, лоадер
+## Этап 4 — Сцена, примитивы, лоадер ✅
 **Цель:** данные сцены и их загрузка.
 
-- `scene/Object3D.js` — transform, children, `worldMatrix` (lazy по dirty).
-- `scene/Scene.js` — список объектов, `update(dt)`, `toJSON()` (round-trip).
-- `scene/SceneRegistry.js` — единый реестр `types` + `scenes`.
-- `scene/SceneLoader.js` — рекурсивный парсер + обработка ошибок.
-- `primitives/`: `Mesh.js` (computeNormals CCW), `Cube`, `Plane`, `Sphere`
+- [x] `scene/Object3D.js` — transform, children, `worldMatrix` (lazy по dirty).
+- [x] `scene/Scene.js` — список объектов, `update(dt)`, `toJSON()` (round-trip).
+- [x] `scene/SceneRegistry.js` — единый реестр `types` + `scenes`.
+- [x] `scene/SceneLoader.js` — рекурсивный парсер + обработка ошибок.
+- [x] `primitives/`: `Mesh.js` (computeNormals CCW), `Cube`, `Plane`, `Sphere`
   (rings×segments), `Pyramid`, `Group`, `Character`.
-- `scenes/empty.js`, `scenes/city_block.js` — встроенные.
+- [x] `scenes/empty.js`, `scenes/city_block.js` — встроенные.
 
 **Приёмка:** из консоли `SceneLoader.load(data)` строит сцену; `toJSON()→load()`
-даёт эквивалент; битый JSON/неизвестный type не роняют приложение.
+даёт эквивалент; битый JSON/неизвестный type не роняют приложение. ✅ (проверено
+через http://ascii3d.local.int/test/scene_test.html: 48 assert зелёные — Object3D
+world-matrix, наружные нормали всех примитивов, реестр, лоадер с обработкой ошибок,
+round-trip toJSON→load; main.js грузит city_block через ?scene= без ошибок)
 
 ---
 
@@ -138,6 +141,6 @@ z-buffer в setCell работает — ближний символ вытес�
 | 1 — Математическое ядро | ✅ выполнено |
 | 2 — Камера + ввод | ✅ выполнено |
 | 3 — FrameBuffer + адаптивный canvas | ✅ выполнено |
-| 4 — Сцена, примитивы, лоадер | ⏳ следующий |
-| 5 — Рендеринг | ⬜ |
+| 4 — Сцена, примитивы, лоадер | ✅ выполнено |
+| 5 — Рендеринг | ⏳ следующий |
 | 6 — UI, полировка, документация | ⬜ |

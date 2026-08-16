@@ -13,6 +13,7 @@ A3D.modules.Main = (function () {
     var input = null;
     var hud = null;
     var frameBuffer = null;
+    var scene = null;
     var charW = 0;
     var charH = 0;
     var lastTime = 0;
@@ -29,6 +30,16 @@ A3D.modules.Main = (function () {
             'Config',
             'Camera',
             'Input',
+            'Object3D',
+            'Mesh',
+            'Cube',
+            'Plane',
+            'Sphere',
+            'Pyramid',
+            'Group',
+            'Character',
+            'Scene',
+            'SceneLoader',
             'GlyphMap',
             'FrameBuffer',
             'HUD'
@@ -55,12 +66,15 @@ A3D.modules.Main = (function () {
         hud = A3D.modules.HUD;
         frameBuffer = new A3D.modules.FrameBuffer();
 
+        registerPrimitiveTypes();
+        loadSceneFromURLParam();
+
         resize();
         window.addEventListener('resize', resize);
 
         input.init(canvas);
         hud.init();
-        hud.setSceneName('default');
+        hud.setSceneName(scene ? scene.name : 'default');
 
         document.addEventListener('keydown', function (e) {
             if (e.code === 'KeyR') {
@@ -74,9 +88,42 @@ A3D.modules.Main = (function () {
         var loaded = Object.keys(A3D.modules).sort();
         Debug.log('Main', 'loaded modules:', loaded.join(', '));
         Debug.log('Main', 'canvas ready:', canvas.id);
+        if (scene) {
+            Debug.log('Main', 'scene "' + scene.name + '": objects=' + scene.objects.length +
+                ', faces=' + scene.countFaces() + ', registry scenes: ' + A3D.SceneRegistry.listScenes().join(', '));
+        }
 
         lastTime = performance.now();
         requestAnimationFrame(frame);
+    }
+
+    // New primitive = one line here; SceneLoader stays untouched.
+    function registerPrimitiveTypes() {
+        var R = A3D.SceneRegistry;
+        R.register('cube',      function (p) { return new A3D.modules.Cube(p); });
+        R.register('plane',     function (p) { return new A3D.modules.Plane(p); });
+        R.register('sphere',    function (p) { return new A3D.modules.Sphere(p); });
+        R.register('pyramid',   function (p) { return new A3D.modules.Pyramid(p); });
+        R.register('group',     function (p) { return new A3D.modules.Group(p); });
+        R.register('character', function (p) { return A3D.modules.Character.build(p); });
+    }
+
+    // ?scene=<name> picks a registered scene; default is the first one.
+    function loadSceneFromURLParam() {
+        var SceneLoader = A3D.modules.SceneLoader;
+        var R = A3D.SceneRegistry;
+        var name = null;
+        try {
+            var match = /[?&]scene=([^&]+)/.exec(window.location.search);
+            if (match) name = decodeURIComponent(match[1]);
+        } catch (e) { /* ignore bad URL */ }
+
+        var data = (name && R.getScene(name)) ? R.getScene(name) : null;
+        if (!data) {
+            var list = R.listScenes();
+            data = list.length > 0 ? R.getScene(list[0]) : { name: 'empty', objects: [] };
+        }
+        scene = SceneLoader.load(data);
     }
 
     function resize() {
@@ -110,6 +157,7 @@ A3D.modules.Main = (function () {
         }
 
         input.update(camera, dt);
+        if (scene) scene.update(dt);
 
         fpsFrames++;
         fpsTimer += dt;
@@ -120,7 +168,8 @@ A3D.modules.Main = (function () {
         }
 
         render();
-        hud.update(camera, fps, frameBuffer.width + 'x' + frameBuffer.height);
+        var sceneInfo = scene ? (' [' + scene.name + '] faces=' + scene.countFaces()) : '';
+        hud.update(camera, fps, frameBuffer.width + 'x' + frameBuffer.height + sceneInfo);
         requestAnimationFrame(frame);
     }
 

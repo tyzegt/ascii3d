@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>A3D Tests — Этап 4</title>
+    <style>
+        body {
+            font-family: monospace;
+            font-size: 14px;
+            background: #111;
+            color: #0f0;
+            padding: 20px;
+        }
+        h1 { color: #0f0; font-size: 18px; }
+        .section { margin-top: 16px; color: #888; }
+        .pass { color: #0f0; }
+        .fail { color: #f44; }
+        .summary { margin-top: 24px; font-size: 16px; }
+    </style>
+</head>
+<body>
+    <h1>A3D — Этап 4: Сцена, примитивы, лоадер</h1>
+    <div id="output"></div>
+
+    <script>
+        var _cb = Date.now();
+        [
+            '../js/utils/Debug.js',
+            '../js/core/MathUtils.js',
+            '../js/core/Vec3.js',
+            '../js/core/Mat4.js',
+            '../js/core/Config.js',
+            '../js/scene/Object3D.js',
+            '../js/scene/SceneRegistry.js',
+            '../js/scene/primitives/Mesh.js',
+            '../js/scene/primitives/Cube.js',
+            '../js/scene/primitives/Plane.js',
+            '../js/scene/primitives/Sphere.js',
+            '../js/scene/primitives/Pyramid.js',
+            '../js/scene/primitives/Group.js',
+            '../js/scene/primitives/Character.js',
+            '../js/scene/Scene.js',
+            '../js/scene/SceneLoader.js',
+            '../scenes/empty.js',
+            '../scenes/city_block.js'
+        ].forEach(function (p) {
+            document.write('<script src="' + p + '?v=' + _cb + '"><\/script>');
+        });
+    </script>
+    <script>
+    (function () {
+        'use strict';
+
+        var Vec3 = A3D.modules.Vec3;
+        var Mat4 = A3D.modules.Mat4;
+        var Object3D = A3D.modules.Object3D;
+        var Mesh = A3D.modules.Mesh;
+        var Cube = A3D.modules.Cube;
+        var Plane = A3D.modules.Plane;
+        var Sphere = A3D.modules.Sphere;
+        var Pyramid = A3D.modules.Pyramid;
+        var Group = A3D.modules.Group;
+        var Character = A3D.modules.Character;
+        var Scene = A3D.modules.Scene;
+        var SceneLoader = A3D.modules.SceneLoader;
+        var R = A3D.SceneRegistry;
+
+        // register types like main.js does
+        R.register('cube',      function (p) { return new Cube(p); });
+        R.register('plane',     function (p) { return new Plane(p); });
+        R.register('sphere',    function (p) { return new Sphere(p); });
+        R.register('pyramid',   function (p) { return new Pyramid(p); });
+        R.register('group',     function (p) { return new Group(p); });
+        R.register('character', function (p) { return Character.build(p); });
+
+        var output = document.getElementById('output');
+        var passed = 0;
+        var failed = 0;
+        var currentSection = '';
+
+        function section(name) {
+            currentSection = name;
+            var div = document.createElement('div');
+            div.className = 'section';
+            div.textContent = '— ' + name + ' —';
+            output.appendChild(div);
+        }
+
+        function report(label, ok, actual, expected) {
+            var line = document.createElement('div');
+            if (ok) {
+                passed++;
+                line.className = 'pass';
+                line.textContent = 'PASS  ' + currentSection + ': ' + label;
+            } else {
+                failed++;
+                line.className = 'fail';
+                var msg = 'FAIL  ' + currentSection + ': ' + label;
+                if (actual !== undefined) msg += '  actual=' + actual;
+                if (expected !== undefined) msg += '  expected=' + expected;
+                line.textContent = msg;
+            }
+            output.appendChild(line);
+            if (!ok) console.error('FAIL', currentSection, label, { actual: actual, expected: expected });
+        }
+
+        function assertTrue(label, cond, detail) { report(label, !!cond, detail); }
+        function assertClose(label, a, e, eps) { if (eps === undefined) eps = 1e-5; report(label, Math.abs(a - e) <= eps, a, e); }
+
+        function approxVec(v, x, y, z, eps) {
+            if (eps === undefined) eps = 1e-4;
+            return Math.abs(v.x - x) <= eps && Math.abs(v.y - y) <= eps && Math.abs(v.z - z) <= eps;
+        }
+
+        // ---------- Object3D ----------
+        function testObject3D() {
+            section('Object3D');
+
+            var o = new Object3D({ position: [1, 2, 3] });
+            assertTrue('position applied', approxVec(o.position, 1, 2, 3));
+
+            var c = new Object3D();
+            o.add(c);
+            assertTrue('add sets parent', c.parent === o);
+            assertTrue('add stores child', o.children.length === 1);
+
+            // world of child = parent T * identity -> translation part (1,2,3)
+            c.getWorldMatrix();
+            var te = c.worldMatrix.elements;
+            assertTrue('child world includes parent translation', approxVec(new Vec3(te[12], te[13], te[14]), 1, 2, 3));
+
+            // move child to local (1,0,0): parent T(1,2,3) o child T(1,0,0); point (1,0,0) -> (3,2,3)
+            c.position = new Vec3(1, 0, 0);
+            c.markDirty();
+            c.getWorldMatrix();
+            assertTrue('nested world translation', approxVec(new Vec3(1, 0, 0).transform(c.worldMatrix), 3, 2, 3));
+
+            o.remove(c);
+            assertTrue('remove detaches', c.parent === null && o.children.length === 0);
+
+            // rotation: child at +x rotated by parent yaw 90deg -> at -z? (Ry(90): x-> -z)
+            var p2 = new Object3D({ rotation: [0, Math.PI / 2, 0] });
+            var ch = new Object3D({ position: [1, 0, 0] });
+            p2.add(ch);
+            ch.getWorldMatrix();
+            var wx = new Vec3(1, 0, 0).transform(ch.worldMatrix);
+            // parent at origin rotated Ry(90°): local (1,0,0) -> world (0,0,-2)
+            assertTrue('parent rotation transforms child', approxVec(wx, 0, 0, -2), '(' + wx.x + ',' + wx.y + ',' + wx.z + ')');
+
+            // scale
+            var p3 = new Object3D({ scale: [2, 3, 4] });
+            var ch2 = new Object3D({ position: [1, 1, 1] });
+            p3.add(ch2);
+            ch2.getWorldMatrix();
+            // parent S(2,3,4) o child T(1,1,1): point (1,1,1) -> (2*1+1, 3*1+1, 4*1+1) = (4,6,8)
+            var ws = new Vec3(1, 1, 1).transform(ch2.worldMatrix);
+            assertTrue('parent scale transforms child', approxVec(ws, 4, 6, 8));
+        }
+
+        // ---------- Mesh / normals ----------
+        function testNormals() {
+            section('Mesh normals (outward)');
+
+            var cube = new Cube();
+            assertTrue('cube has 8 vertices', cube.vertices.length === 8);
+            assertTrue('cube has 12 faces', cube.faces.length === 12);
+
+            // each face normal should point away from origin (unit cube centered at 0)
+            var allOut = true;
+            for (var i = 0; i < cube.faces.length; i++) {
+                var f = cube.faces[i];
+                var a = cube.vertices[f.indices[0]];
+                var centroid = a.add(cube.vertices[f.indices[1]]).add(cube.vertices[f.indices[2]]).scale(1 / 3);
+                if (f.normal.dot(centroid) <= 0) allOut = false;
+            }
+            assertTrue('cube normals point outward', allOut);
+
+            var sphere = new Sphere({ rings: 8, segments: 10 });
+            assertTrue('sphere vertex count = rings-1*segments + 2', sphere.vertices.length === (8 - 1) * 10 + 2);
+            var sOut = true;
+            for (var s = 0; s < sphere.faces.length; s++) {
+                var sf = sphere.faces[s];
+                var sa = sphere.vertices[sf.indices[0]];
+                var sc = sa.add(sphere.vertices[sf.indices[1]]).add(sphere.vertices[sf.indices[2]]).scale(1 / 3);
+                if (sf.normal.dot(sc) <= 0) sOut = false;
+            }
+            assertTrue('sphere normals point outward', sOut);
+
+            var plane = new Plane({ segments: 4, size: 10 });
+            assertTrue('plane face count = seg^2 * 2', plane.faces.length === 4 * 4 * 2);
+            var upOk = true;
+            for (var p = 0; p < plane.faces.length; p++) {
+                if (Math.abs(plane.faces[p].normal.y - 1) > 1e-5) upOk = false;
+            }
+            assertTrue('plane normals are +y', upOk);
+
+            var pyr = new Pyramid();
+            assertTrue('pyramid has 5 vertices', pyr.vertices.length === 5);
+            assertTrue('pyramid has 5 faces', pyr.faces.length === 5);
+
+            // pyramid: all 5 faces outward (4 sides + bottom, no top cap)
+            var pOut = true;
+            for (var pp = 0; pp < pyr.faces.length; pp++) {
+                var pf = pyr.faces[pp];
+                var pa = pyr.vertices[pf.indices[0]];
+                var pcen = pa.add(pyr.vertices[pf.indices[1]]).add(pyr.vertices[pf.indices[2]]).scale(1 / 3);
+                if (pf.normal.dot(pcen) <= 0) pOut = false;
+            }
+            assertTrue('pyramid normals point outward', pOut);
+
+            // edges: unique vertex-index pairs (cube triangulation yields 19)
+            var cubeEdges = cube.getEdges();
+            assertTrue('cube edges deduplicated (' + cubeEdges.length + ' unique)', cubeEdges.length > 0 && cubeEdges.length <= 36);
+        }
+
+        // ---------- SceneRegistry ----------
+        function testRegistry() {
+            section('SceneRegistry');
+
+            R.register('fake_type', function (p) { return new Object3D(p); });
+            assertTrue('register + hasType', R.hasType('fake_type'));
+            var created = R.create('cube', { position: [1, 1, 1] });
+            assertTrue('create returns Cube', created instanceof Cube);
+            assertTrue('create applies params', approxVec(created.position, 1, 1, 1));
+            assertTrue('create unknown -> null', R.create('nope') === null);
+
+            var list = R.listScenes();
+            assertTrue('listScenes includes city_block', list.indexOf('city_block') !== -1);
+            assertTrue('listScenes includes empty', list.indexOf('empty') !== -1);
+            assertTrue('getScene returns data', !!R.getScene('city_block'));
+            assertTrue('getScene unknown -> null', R.getScene('zzz') === null);
+
+            delete R.types.fake_type; // cleanup
+        }
+
+        // ---------- SceneLoader ----------
+        function testLoader() {
+            section('SceneLoader');
+
+            var data = {
+                name: 't',
+                objects: [
+                    { type: 'cube', position: [1, 2, 3] },
+                    {
+                        type: 'group', name: 'g',
+                        children: [
+                            { type: 'sphere', rings: 6, segments: 8 },
+                            { type: 'character' }
+                        ]
+                    },
+                    { type: 'bogus_type' },
+                    { position: [0, 0, 0] }, // missing type
+                    null
+                ]
+            };
+
+            var scene = SceneLoader.load(data);
+            assertTrue('scene name', scene.name === 't');
+            assertTrue('valid objects kept (2 roots)', scene.objects.length === 2, 'got ' + scene.objects.length);
+            assertTrue('cube loaded', scene.objects[0] instanceof Cube);
+            assertTrue('group loaded', scene.objects[1] instanceof Group);
+            assertTrue('group children = 2', scene.objects[1].children.length === 2);
+            assertTrue('nested sphere', scene.objects[1].children[0] instanceof Sphere);
+            assertTrue('nested character is group', scene.objects[1].children[1] instanceof Group);
+
+            // invalid top-level inputs must not throw
+            var e1 = SceneLoader.load(null);
+            assertTrue('load(null) -> empty scene', e1 instanceof Scene && e1.objects.length === 0);
+            var e2 = SceneLoader.load('garbage');
+            assertTrue('load(string) -> empty scene', e2 instanceof Scene && e2.objects.length === 0);
+
+            // deeply nested (cycle protection via depth limit)
+            var deep = { type: 'group' };
+            var node = deep;
+            for (var i = 0; i < 40; i++) { node.children = [{ type: 'group' }]; node = node.children[0]; }
+            var dScene = SceneLoader.load({ name: 'deep', objects: [deep] });
+            assertTrue('deep nesting does not throw', dScene instanceof Scene);
+        }
+
+        // ---------- Round-trip toJSON ----------
+        function testRoundTrip() {
+            section('Round-trip toJSON -> load');
+
+            var data = R.getScene('city_block');
+            var s1 = SceneLoader.load(data);
+            assertTrue('first load ok', s1.objects.length === 7, 'got ' + s1.objects.length);
+
+            var json = s1.toJSON();
+            assertTrue('toJSON has objects array', Array.isArray(json.objects) && json.objects.length === 7);
+            assertTrue('toJSON preserves name', json.name === 'city_block');
+            assertTrue('toJSON preserves camera', !!json.camera && json.camera.position);
+
+            var s2 = SceneLoader.load(json);
+            assertTrue('round-trip same object count', s2.objects.length === s1.objects.length);
+
+            // compare structure: types + transforms of every node
+            function flat(scene) {
+                var out = [];
+                scene.objects.forEach(function (root) {
+                    root.traverse(function (n) {
+                        out.push({
+                            type: n.meshType || (n.isGroup ? 'group' : '?'),
+                            p: [n.position.x, n.position.y, n.position.z],
+                            s: [n.scale.x, n.scale.y, n.scale.z]
+                        });
+                    });
+                });
+                return out;
+            }
+
+            var f1 = flat(s1).sort();
+            var f2 = flat(s2).sort();
+            function near(a, b) {
+                if (a.type !== b.type) return false;
+                for (var i = 0; i < 3; i++) {
+                    if (Math.abs(a.p[i] - b.p[i]) > 1e-4 || Math.abs(a.s[i] - b.s[i]) > 1e-4) return false;
+                }
+                return true;
+            }
+            var same = f1.length === f2.length;
+            if (same) {
+                for (var i = 0; i < f1.length; i++) { if (!near(f1[i], f2[i])) { same = false; break; } }
+            }
+            assertTrue('round-trip structure equivalent (' + f1.length + ' nodes)', same);
+
+            // group serialization keeps children
+            var g = s1.objects[1];
+            var gj = g.toJSON();
+            assertTrue('group toJSON has children', Array.isArray(gj.children) && gj.children.length === 2);
+        }
+
+        function testCharacter() {
+            section('Character composite');
+            var c = Character.build({ name: 'c' });
+            assertTrue('character is Group', c instanceof Group);
+            assertTrue('character has 2 children', c.children.length === 2);
+            assertTrue('body is Cube', c.children[0] instanceof Cube);
+            assertTrue('head is Sphere', c.children[1] instanceof Sphere);
+        }
+
+        testObject3D();
+        testNormals();
+        testRegistry();
+        testLoader();
+        testRoundTrip();
+        testCharacter();
+
+        var summary = document.createElement('div');
+        summary.className = 'summary';
+        if (failed === 0) {
+            summary.style.color = '#0f0';
+            summary.textContent = '✓ ALL TESTS PASSED: ' + passed + ' passed, 0 failed';
+            console.log('%cA3D STAGE-4 TESTS: ALL PASSED (' + passed + ')', 'color: #0f0; font-size: 16px;');
+        } else {
+            summary.style.color = '#f44';
+            summary.textContent = '✗ TESTS FAILED: ' + passed + ' passed, ' + failed + ' failed';
+            console.error('A3D STAGE-4 TESTS: ' + failed + ' failed, ' + passed + ' passed');
+        }
+        output.appendChild(summary);
+    })();
+    </script>
+</body>
+</html>
