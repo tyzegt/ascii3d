@@ -38,7 +38,7 @@ A3D.modules.HUD = (function () {
             '<span id="hud-rot">rot: -</span>\n' +
             '<span id="hud-scene">scene: -</span>\n' +
             '<span id="hud-grid">grid: -</span>\n' +
-            '<span id="hud-hints">WASD/QE move, mouse look (click)\n' +
+            '<span id="hud-hints">WASD/QE move, arrows+ZX look, mouse look (click)\n' +
             '1-5 add obj, Tab menu, R reset, H hud, P save</span>';
         document.body.appendChild(el);
         fpsEl = document.getElementById('hud-fps');

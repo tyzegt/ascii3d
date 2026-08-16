@@ -12,6 +12,8 @@ A3D.modules.Config = (function () {
         FAR: 500,
         SPEED: 8,
         SENSITIVITY: 0.003,
+        TURN_SPEED: 2.5,
+        LOOK_SPEED: 1.5,
         MAX_DT: 0.1,
         PITCH_LIMIT: MathUtils.degToRad(89),
         DEFAULT_SCENE: 'city_block',

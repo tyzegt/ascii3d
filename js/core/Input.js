@@ -18,6 +18,7 @@ A3D.modules.Input = (function () {
     var ARROWS = [
         'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space',
         'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE',
+        'KeyZ', 'KeyX',
         'KeyR', 'KeyH', 'Tab'
     ];
 
@@ -123,6 +124,13 @@ A3D.modules.Input = (function () {
             var turn = 0;
             var look = 0;
 
+            if (keys['KeyZ']) {
+                look -= 1;
+            }
+            if (keys['KeyX']) {
+                look += 1;
+            }
+
             if (keys['KeyW'] || keys['ArrowUp']) {
                 move += 1;
             }
@@ -152,8 +160,11 @@ A3D.modules.Input = (function () {
             if (locked) {
                 camera.rotate(delta.x * Config.SENSITIVITY, delta.y * Config.SENSITIVITY);
             }
+            if (look !== 0) {
+                camera.rotate(0, look * Config.LOOK_SPEED * dt);
+            }
             if (turn !== 0) {
-                camera.rotate(turn * Config.SENSITIVITY * 15 * dt, 0);
+                camera.rotate(turn * Config.TURN_SPEED * dt, 0);
             }
             if (move !== 0) {
                 camera.moveForward(move * Config.SPEED * dt);
