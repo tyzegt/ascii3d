@@ -27,10 +27,9 @@ A3D.modules.FrameBuffer = (function () {
         for (var i = 0; i < n; i++) {
             this.chars[i] = Config.GLYPH_MAP.empty;
         }
+        // Инициализируем 0: з-тест держит МАКСИМУМ 1/w (ближе = больше 1/w),
+        // поэтому пустая ячейка должна проигрывать любому реальному значению.
         this.depth = new Float32Array(n);
-        for (var j = 0; j < n; j++) {
-            this.depth[j] = Infinity;
-        }
         this.ids = new Int32Array(n);
         for (var k = 0; k < n; k++) {
             this.ids[k] = -1;
@@ -45,7 +44,7 @@ A3D.modules.FrameBuffer = (function () {
         for (var i = 0; i < this.chars.length; i++) {
             this.chars[i] = empty;
         }
-        this.depth.fill(Infinity);
+        this.depth.fill(0);
         if (this.ids) {
             this.ids.fill(-1);
         }
@@ -61,8 +60,9 @@ A3D.modules.FrameBuffer = (function () {
             return;
         }
         var i = y * this.width + x;
-        // z-buffer: пишем, только если глубина ближе (меньше 1/w)
-        if (depth === undefined || depth < this.depth[i]) {
+        // z-buffer: пишем, только если глубина ближе. Камера смотрит вдоль -z,
+        // w = -z_cam: БЛИЖЕ = МЕНЬШЕ w = БОЛЬШЕ 1/w. Значит держим МАКСИМУМ 1/w.
+        if (depth === undefined || depth > this.depth[i]) {
             this.chars[i] = ch;
             this.depth[i] = depth;
             if (this.ids) {
@@ -84,7 +84,7 @@ A3D.modules.FrameBuffer = (function () {
         x |= 0;
         y |= 0;
         if (!this.depth || x < 0 || x >= this.width || y < 0 || y >= this.height) {
-            return Infinity;
+            return 0;
         }
         return this.depth[y * this.width + x];
     };

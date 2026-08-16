@@ -154,7 +154,7 @@ A3D.modules.Main = (function () {
             Debug.log('Main', 'camera reset');
         } else if (e.code === 'KeyH') {
             hud.toggle();
-        } else if (e.code === 'KeyS') {
+        } else if (e.code === 'KeyP') {
             saveScene();
         } else if (e.code >= 'Digit1' && e.code <= 'Digit9') {
             var num = parseInt(e.code.charAt(5), 10);

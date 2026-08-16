@@ -212,18 +212,35 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
             });
         });
 
-        // sort by camera-space distance, far first
-        var p = viewMatrix.elements;
+        // sort back-to-front. Rank each mesh by its NEAREST point to the camera:
+        // max w (= -z_cam) over the 8 bounding-box corners. Sorting by the mesh
+        // origin alone misorders large flat meshes (e.g. the ground plane), whose
+        // origin can be far from the camera while part of the surface is near it,
+        // so their faces get drawn first and then win z-tests they should lose.
+        var pv = viewMatrix.elements;
+        function nearestW(mesh) {
+            var bb = getBoundingBox(mesh);
+            var wm = mesh.worldMatrix.elements;
+            var best = -Infinity;
+            for (var i = 0; i < 2; i++) {
+                var x = i ? bb.maxX : bb.minX;
+                for (var j = 0; j < 2; j++) {
+                    var y = j ? bb.maxY : bb.minY;
+                    for (var k = 0; k < 2; k++) {
+                        var z = k ? bb.maxZ : bb.minZ;
+                        // world = wm * local, then camera space
+                        var wx = wm[0] * x + wm[4] * y + wm[8] * z + wm[12];
+                        var wy = wm[1] * x + wm[5] * y + wm[9] * z + wm[13];
+                        var wz = wm[2] * x + wm[6] * y + wm[10] * z + wm[14];
+                        var cz = pv[2] * wx + pv[6] * wy + pv[10] * wz + pv[14];
+                        if (-cz > best) best = -cz;
+                    }
+                }
+            }
+            return best;
+        }
         meshes.sort(function (a, b) {
-            var wa = a.worldMatrix.elements;
-            var wb = b.worldMatrix.elements;
-            var ax = p[0] * wa[12] + p[4] * wa[13] + p[8] * wa[14] + p[12];
-            var ay = p[1] * wa[12] + p[5] * wa[13] + p[9] * wa[14] + p[13];
-            var az = p[2] * wa[12] + p[6] * wa[13] + p[10] * wa[14] + p[14];
-            var bx = p[0] * wb[12] + p[4] * wb[13] + p[8] * wb[14] + p[12];
-            var by = p[1] * wb[12] + p[5] * wb[13] + p[9] * wb[14] + p[13];
-            var bz = p[2] * wb[12] + p[6] * wb[13] + p[10] * wb[14] + p[14];
-            return (bx * bx + by * by + bz * bz) - (ax * ax + ay * ay + az * az);
+            return nearestW(a) - nearestW(b);
         });
 
         // pass 1: polygon fill

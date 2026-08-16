@@ -276,23 +276,23 @@
             // a corner outside the triangle should be empty
             assertTrue('outside cell empty', fb.getChar(2, 2) === ' ');
 
-            // Depth convention: w = -z_cam, so CLOSER objects have LARGER w and
-            // therefore SMALLER 1/w (invW). The z-buffer keeps the smallest invW.
-            // z-buffer: draw a closer polygon (smaller invW) over the same area -> replaces
+            // Depth convention: w = -z_cam (camera looks down -z). CLOSER objects
+            // have SMALLER w and therefore LARGER 1/w (invW). The z-buffer keeps
+            // the LARGEST invW. So a "near" polygon has a larger invW value.
             var ptsNear = [
-                { x: 15, y: 8, invW: 0.1 },   // smaller 1/w = closer
-                { x: 25, y: 8, invW: 0.1 },
-                { x: 20, y: 12, invW: 0.1 }
+                { x: 15, y: 8, invW: 0.5 },   // larger 1/w = closer
+                { x: 25, y: 8, invW: 0.5 },
+                { x: 20, y: 12, invW: 0.5 }
             ];
             Rasterizer.fillPoly(fb, ptsNear, '@');
-            // center is inside both; closer one (invW=0.1) should win
+            // center is inside the near polygon; it should win
             assertTrue('closer polygon wins z-buffer', fb.getChar(20, 10) === '@', 'got ' + JSON.stringify(fb.getChar(20, 10)));
 
-            // a farther polygon (larger invW) must NOT overwrite
+            // a farther polygon (smaller invW) must NOT overwrite
             var ptsFar = [
-                { x: 18, y: 9, invW: 0.5 },
-                { x: 22, y: 9, invW: 0.5 },
-                { x: 20, y: 11, invW: 0.5 }
+                { x: 18, y: 9, invW: 0.1 },
+                { x: 22, y: 9, invW: 0.1 },
+                { x: 20, y: 11, invW: 0.1 }
             ];
             Rasterizer.fillPoly(fb, ptsFar, '+');
             assertTrue('farther polygon rejected by z-buffer', fb.getChar(20, 10) === '@', 'got ' + JSON.stringify(fb.getChar(20, 10)));
