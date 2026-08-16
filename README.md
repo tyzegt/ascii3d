@@ -194,3 +194,9 @@ per-face-group UV, perspective-correct sampling) are implemented and integrated
 into the built-in scenes (`city_block`, `desert`, `character_demo`). See
 `FEATURES_PLAN.md` (stages A–C ✅) for details. Remaining: transparency,
 quaternions, LOD, object picker.
+
+## AI assistance
+
+All AI-assisted work on this project was done exclusively with LLMs running
+locally — no cloud APIs were used: **Qwen 3.8 27B** for the code and
+**DeepSeek v4 Flash 0731** for planning.
