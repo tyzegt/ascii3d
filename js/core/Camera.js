@@ -109,7 +109,13 @@ A3D.modules.Camera = (function () {
     };
 
     Camera.prototype.setView = function (position, yaw, pitch) {
-        this.position = (position instanceof Vec3) ? position.clone() : new Vec3(position.x, position.y, position.z);
+        if (position instanceof Vec3) {
+            this.position = position.clone();
+        } else if (Array.isArray(position)) {
+            this.position = new Vec3(position[0] || 0, position[1] || 0, position[2] || 0);
+        } else {
+            this.position = new Vec3(position.x || 0, position.y || 0, position.z || 0);
+        }
         this.yaw = yaw || 0;
         this.pitch = MathUtils.clamp(pitch || 0, -Config.PITCH_LIMIT, Config.PITCH_LIMIT);
     };

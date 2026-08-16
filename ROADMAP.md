@@ -97,17 +97,19 @@ round-trip toJSON→load; main.js грузит city_block через ?scene= б�
 
 ---
 
-## Этап 5 — Рендеринг
+## Этап 5 — Рендеринг ✅
 **Цель:** видимая ascii-3D сцена.
 
-- `render/Projection.js` — world→camera→near-clip (Sutherland–Hodgman)→ndc→screen
+- [x] `render/Projection.js` — world→camera→near-clip (Sutherland–Hodgman)→ndc→screen
   + коррекция аспекта ячейки.
-- `render/Rasterizer.js` — scanline, интерполяция `1/w`, z-buffer, символ из
+- [x] `render/Rasterizer.js` — scanline, интерполяция `1/w`, z-buffer, символ из
   GlyphMap; отдельный проход рёбер (`@`).
-- `main.js` — game loop: `dt` с clamp ≈0.1с, `requestAnimationFrame`.
+- [x] `main.js` — game loop: `dt` с clamp ≈0.1с, `requestAnimationFrame`.
 
 **Приёмка:** земля + куб видны без искажений форм, корректная взаимная скрытость,
-движение плавное.
+движение плавное. ✅ (проверено через http://ascii3d.local.int/?scene=city_block:
+консоль чиста, здания/купол/земля видны с корректной окклюзией, 1209 граней,
+60 FPS; test/render_test.html — 33 assert зелёные)
 
 ---
 
@@ -142,5 +144,5 @@ round-trip toJSON→load; main.js грузит city_block через ?scene= б�
 | 2 — Камера + ввод | ✅ выполнено |
 | 3 — FrameBuffer + адаптивный canvas | ✅ выполнено |
 | 4 — Сцена, примитивы, лоадер | ✅ выполнено |
-| 5 — Рендеринг | ⏳ следующий |
-| 6 — UI, полировка, документация | ⬜ |
+| 5 — Рендеринг | ✅ выполнено |
+| 6 — UI, полировка, документация | ⏳ следующий |

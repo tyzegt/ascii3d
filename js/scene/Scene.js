@@ -39,11 +39,13 @@ A3D.modules.Scene = (function () {
         return null;
     };
 
-    // Recomputes world matrices for every root object (lazy, dirty only).
+    // Recomputes world matrices for every node in the scene (lazy, dirty only).
     Scene.prototype.update = function (dt) {
         dt = dt || 0;
         for (var i = 0; i < this.objects.length; i++) {
-            this.objects[i].getWorldMatrix();
+            this.objects[i].traverse(function (node) {
+                node.getWorldMatrix();
+            });
         }
         // Future: per-object animation hooks can use dt here.
     };

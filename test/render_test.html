@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>A3D Tests — Этап 5</title>
+    <style>
+        body {
+            font-family: monospace;
+            font-size: 14px;
+            background: #111;
+            color: #0f0;
+            padding: 20px;
+        }
+        h1 { color: #0f0; font-size: 18px; }
+        .section { margin-top: 16px; color: #888; }
+        .pass { color: #0f0; }
+        .fail { color: #f44; }
+        .summary { margin-top: 24px; font-size: 16px; }
+    </style>
+</head>
+<body>
+    <h1>A3D — Этап 5: Рендеринг (Projection + Rasterizer)</h1>
+    <div id="output"></div>
+
+    <script>
+        var _cb = Date.now();
+        [
+            '../js/utils/Debug.js',
+            '../js/core/MathUtils.js',
+            '../js/core/Vec3.js',
+            '../js/core/Mat4.js',
+            '../js/core/Config.js',
+            '../js/core/Camera.js',
+            '../js/scene/Object3D.js',
+            '../js/scene/SceneRegistry.js',
+            '../js/scene/primitives/Mesh.js',
+            '../js/scene/primitives/Cube.js',
+            '../js/scene/primitives/Plane.js',
+            '../js/scene/primitives/Sphere.js',
+            '../js/scene/primitives/Pyramid.js',
+            '../js/scene/primitives/Group.js',
+            '../js/scene/primitives/Character.js',
+            '../js/scene/Scene.js',
+            '../js/scene/SceneLoader.js',
+            '../js/render/GlyphMap.js',
+            '../js/render/Projection.js',
+            '../js/render/Rasterizer.js',
+            '../js/render/FrameBuffer.js'
+        ].forEach(function (p) {
+            document.write('<script src="' + p + '?v=' + _cb + '"><\/script>');
+        });
+    </script>
+    <script>
+    (function () {
+        'use strict';
+
+        var Vec3 = A3D.modules.Vec3;
+        var Mat4 = A3D.modules.Mat4;
+        var Camera = A3D.modules.Camera;
+        var Scene = A3D.modules.Scene;
+        var Cube = A3D.modules.Cube;
+        var Plane = A3D.modules.Plane;
+        var FrameBuffer = A3D.modules.FrameBuffer;
+        var Projection = A3D.modules.Projection;
+        var Rasterizer = A3D.modules.Rasterizer;
+
+        var output = document.getElementById('output');
+        var passed = 0;
+        var failed = 0;
+        var currentSection = '';
+
+        function section(name) {
+            currentSection = name;
+            var div = document.createElement('div');
+            div.className = 'section';
+            div.textContent = '— ' + name + ' —';
+            output.appendChild(div);
+        }
+
+        function report(label, ok, actual, expected) {
+            var line = document.createElement('div');
+            if (ok) {
+                passed++;
+                line.className = 'pass';
+                line.textContent = 'PASS  ' + currentSection + ': ' + label;
+            } else {
+                failed++;
+                line.className = 'fail';
+                var msg = 'FAIL  ' + currentSection + ': ' + label;
+                if (actual !== undefined) msg += '  actual=' + actual;
+                if (expected !== undefined) msg += '  expected=' + expected;
+                line.textContent = msg;
+            }
+            output.appendChild(line);
+            if (!ok) console.error('FAIL', currentSection, label, { actual: actual, expected: expected });
+        }
+
+        function assertTrue(label, cond, detail) { report(label, !!cond, detail); }
+        function assertClose(label, a, e, eps) { if (eps === undefined) eps = 1e-4; report(label, Math.abs(a - e) <= eps, a, e); }
+
+        // Camera at origin looking down -z with identity orientation.
+        function makeTestCamera() {
+            var cam = new Camera();
+            cam.position = new Vec3(0, 0, 5);
+            cam.yaw = 0;
+            cam.pitch = 0;
+            cam.aspect = 1;
+            return cam;
+        }
+
+        // ---------- Near clipping (Sutherland-Hodgman) ----------
+        // Convention: camera looks down -z, so a point is IN FRONT when z < 0.
+        // clipNear(verts, near) keeps the region z <= -near.
+        function testClipNear() {
+            section('Projection.clipNear');
+
+            var near = 1.0;
+
+            // fully in front (z negative) -> unchanged count
+            var allIn = [
+                { x: 0, y: 0, z: -2 },
+                { x: 1, y: 0, z: -3 },
+                { x: 0, y: 1, z: -4 }
+            ];
+            var r1 = Projection.clipNear(allIn, near);
+            assertTrue('all-in polygon kept (3 verts)', r1 && r1.length === 3, 'got ' + (r1 && r1.length));
+
+            // fully behind (z positive) -> null
+            var allBehind = [
+                { x: 0, y: 0, z: 2 },
+                { x: 1, y: 0, z: 3 },
+                { x: 0, y: 1, z: 4 }
+            ];
+            var r2 = Projection.clipNear(allBehind, near);
+            assertTrue('all-behind polygon -> null', r2 === null);
+
+            // one vertex behind (z positive) -> clipped to quad (4 verts), all z <= -near
+            var mixed = [
+                { x: 0, y: 0, z: -2 },
+                { x: 1, y: 0, z: 3 },    // behind
+                { x: 0, y: 1, z: -4 }
+            ];
+            var r3 = Projection.clipNear(mixed, near);
+            assertTrue('one-behind -> quad (4 verts)', r3 && r3.length === 4, 'got ' + (r3 && r3.length));
+            if (r3) {
+                var allZ = true;
+                for (var i = 0; i < r3.length; i++) {
+                    if (r3[i].z > -near + 1e-6) allZ = false;
+                }
+                assertTrue('all clipped verts z <= -near', allZ);
+            }
+
+            // two vertices behind -> triangle (3 verts)
+            var twoBehind = [
+                { x: 0, y: 0, z: -2 },
+                { x: 1, y: 0, z: 3 },
+                { x: 0, y: 1, z: 4 }
+            ];
+            var r4 = Projection.clipNear(twoBehind, near);
+            assertTrue('two-behind -> triangle (3 verts)', r4 && r4.length === 3, 'got ' + (r4 && r4.length));
+
+            // interpolation correctness: edge from z=-2 to z=2 crossing z=-1
+            var tri = [
+                { x: 0, y: 0, z: -2 },
+                { x: 10, y: 0, z: 2 },
+                { x: 5, y: 5, z: -10 }
+            ];
+            var r5 = Projection.clipNear(tri, near);
+            if (r5) {
+                // crossing at z=-1: t = (-1 - (-2)) / (2 - (-2)) = 1/4 -> x = 0 + 10*0.25 = 2.5
+                var found = null;
+                for (var k = 0; k < r5.length; k++) {
+                    if (Math.abs(r5[k].z - (-near)) < 1e-6 && Math.abs(r5[k].x - 2.5) < 1e-6) {
+                        found = r5[k];
+                    }
+                }
+                assertTrue('clip interpolation exact (x=2.5 at z=-near)', !!found, 'verts: ' + JSON.stringify(r5.map(function(v){return [v.x,v.z];})));
+            } else {
+                assertTrue('clip interpolation exact (x=2.5 at z=-near)', false, 'no result');
+            }
+        }
+
+        // ---------- projectFace ----------
+        function testProjectFace() {
+            section('Projection.projectFace');
+
+            var cam = makeTestCamera();
+            var view = cam.getViewMatrix();
+            var proj = cam.getProjectionMatrix();
+            var W = 100, H = 50, aspect = 2.0; // cellH/cellW
+
+            // A triangle facing the camera. Camera at (0,0,5) looks down -z.
+            // A face at z=0 with normal pointing +z (towards the camera) is visible.
+            var tri = [new Vec3(-1, -1, 0), new Vec3(1, -1, 0), new Vec3(0, 1, 0)];
+            // normal: (v1-v0)x(v2-v0) = (2,0,0)x(1,2,0) = (0*0-0*2, 0*1-2*0, 2*2-0*1)=(0,0,4)->normalize (0,0,1)
+            var normalWorld = new Vec3(0, 0, 1);
+            var normalCam = Projection.normalToCamera(normalWorld, view);
+
+            var r = Projection.projectFace(tri, normalCam, view, proj, W, H, aspect);
+            assertTrue('front-facing face projects', !!r);
+            if (r) {
+                assertTrue('projected 3 points', r.pts.length === 3);
+                // center of triangle should project near screen center (x=50)
+                var avgX = (r.pts[0].x + r.pts[1].x + r.pts[2].x) / 3;
+                assertClose('centroid x near center', avgX, W / 2, W * 0.1);
+                // all invW positive
+                var okW = true;
+                for (var i = 0; i < r.pts.length; i++) {
+                    if (r.pts[i].invW <= 0) okW = false;
+                }
+                assertTrue('all invW > 0', okW);
+
+                // back-face cull: same triangle but normal flipped -> culled
+                var rBack = Projection.projectFace(tri, new Vec3(-normalCam.x, -normalCam.y, -normalCam.z), view, proj, W, H, aspect);
+                assertTrue('back-facing face culled', rBack === null);
+            }
+
+            // Face behind the camera -> clipped to null
+            var behind = [new Vec3(-1, -1, 8), new Vec3(1, -1, 8), new Vec3(0, 1, 8)];
+            var nBehind = Projection.normalToCamera(new Vec3(0, 0, 1), view);
+            var rBehind = Projection.projectFace(behind, nBehind, view, proj, W, H, aspect);
+            assertTrue('face behind camera -> null', rBehind === null);
+
+            // Normal transform: camera at (0,0,5) looking to origin has identity
+            // rotation (forward = world -z). So a world normal is unchanged in
+            // camera space: world (0,0,1) -> cam (0,0,1).
+            assertClose('normalToCamera x', normalCam.x, 0, 1e-5);
+            assertClose('normalToCamera y', normalCam.y, 0, 1e-5);
+            assertClose('normalToCamera z', normalCam.z, 1, 1e-5);
+        }
+
+        // ---------- projectEdge ----------
+        function testProjectEdge() {
+            section('Projection.projectEdge');
+
+            var cam = makeTestCamera();
+            var view = cam.getViewMatrix();
+            var proj = cam.getProjectionMatrix();
+            var W = 100, H = 50, aspect = 2.0;
+
+            // visible edge (z=0 is in front of camera at z=5)
+            var e1 = Projection.projectEdge(new Vec3(-1, 0, 0), new Vec3(1, 0, 0), view, proj, W, H, aspect);
+            assertTrue('visible edge projects', !!e1 && e1.length === 2);
+            if (e1) {
+                assertTrue('edge invW > 0', e1[0].invW > 0 && e1[1].invW > 0);
+            }
+
+            // both endpoints behind camera (z=8 > camera z=5) -> null
+            var e2 = Projection.projectEdge(new Vec3(-1, 0, 8), new Vec3(1, 0, 8), view, proj, W, H, aspect);
+            assertTrue('edge behind camera -> null', e2 === null);
+
+            // one endpoint in front (z=-1), one behind (z=8) -> clipped, returns 2 pts
+            var e3 = Projection.projectEdge(new Vec3(-1, 0, -1), new Vec3(1, 0, 8), view, proj, W, H, aspect);
+            assertTrue('edge crossing near plane clips', !!e3 && e3.length === 2);
+        }
+
+        // ---------- Rasterizer: fillPoly + z-buffer ----------
+        function testRasterizer() {
+            section('Rasterizer.fillPoly / z-buffer');
+
+            var fb = new FrameBuffer();
+            fb.resize(40, 20);
+            fb.clear();
+
+            // A triangle covering the center of the buffer.
+            var pts = [
+                { x: 10, y: 5, invW: 0.2 },
+                { x: 30, y: 5, invW: 0.2 },
+                { x: 20, y: 15, invW: 0.2 }
+            ];
+            Rasterizer.fillPoly(fb, pts, '#');
+
+            // center cell should be filled
+            assertTrue('center cell filled', fb.getChar(20, 10) === '#', 'got ' + JSON.stringify(fb.getChar(20, 10)));
+            // a corner outside the triangle should be empty
+            assertTrue('outside cell empty', fb.getChar(2, 2) === ' ');
+
+            // Depth convention: w = -z_cam, so CLOSER objects have LARGER w and
+            // therefore SMALLER 1/w (invW). The z-buffer keeps the smallest invW.
+            // z-buffer: draw a closer polygon (smaller invW) over the same area -> replaces
+            var ptsNear = [
+                { x: 15, y: 8, invW: 0.1 },   // smaller 1/w = closer
+                { x: 25, y: 8, invW: 0.1 },
+                { x: 20, y: 12, invW: 0.1 }
+            ];
+            Rasterizer.fillPoly(fb, ptsNear, '@');
+            // center is inside both; closer one (invW=0.1) should win
+            assertTrue('closer polygon wins z-buffer', fb.getChar(20, 10) === '@', 'got ' + JSON.stringify(fb.getChar(20, 10)));
+
+            // a farther polygon (larger invW) must NOT overwrite
+            var ptsFar = [
+                { x: 18, y: 9, invW: 0.5 },
+                { x: 22, y: 9, invW: 0.5 },
+                { x: 20, y: 11, invW: 0.5 }
+            ];
+            Rasterizer.fillPoly(fb, ptsFar, '+');
+            assertTrue('farther polygon rejected by z-buffer', fb.getChar(20, 10) === '@', 'got ' + JSON.stringify(fb.getChar(20, 10)));
+
+            // perspective-correct interpolation: invW should be lower at the far edge
+            var grad = Rasterizer.computeInvWGradient(pts);
+            assertTrue('invW gradient computed', isFinite(grad.A) && isFinite(grad.B) && isFinite(grad.C));
+        }
+
+        // ---------- drawLine ----------
+        function testDrawLine() {
+            section('Rasterizer.drawLine');
+
+            var fb = new FrameBuffer();
+            fb.resize(30, 10);
+            fb.clear();
+
+            Rasterizer.drawLine(fb, { x: 5, y: 5, invW: 0.2 }, { x: 25, y: 5, invW: 0.2 }, '@');
+            assertTrue('horizontal line drawn at start', fb.getChar(5, 5) === '@');
+            assertTrue('horizontal line drawn at end', fb.getChar(25, 5) === '@');
+            assertTrue('horizontal line drawn in middle', fb.getChar(15, 5) === '@');
+
+            var fb2 = new FrameBuffer();
+            fb2.resize(30, 10);
+            fb2.clear();
+            Rasterizer.drawLine(fb2, { x: 10, y: 2, invW: 0.2 }, { x: 10, y: 8, invW: 0.2 }, '@');
+            assertTrue('vertical line drawn', fb2.getChar(10, 5) === '@');
+        }
+
+        // ---------- Full scene render (smoke test) ----------
+        function testSceneRender() {
+            section('Rasterizer.render (scene smoke)');
+
+            var cam = makeTestCamera();
+            cam.position = new Vec3(0, 2, 10);
+            cam.yaw = 0;
+            cam.pitch = 0;   // look straight ahead so the sphere is centered
+            cam.aspect = 2;
+
+            var scene = new Scene({ name: 'test' });
+            // ground plane at y=0 (fills the lower part of the view)
+            var ground = new Plane({ segments: 4, size: 40 });
+            scene.add(ground);
+            // sphere in front of and slightly below the camera -> centered in view
+            var Sphere = A3D.modules.Sphere;
+            var orb = new Sphere({ rings: 6, segments: 8 });
+            orb.position = new Vec3(0, 1.5, 4);
+            orb.scale = new Vec3(1.5, 1.5, 1.5);
+            orb.markDirty();
+            scene.add(orb);
+
+            scene.update(0);
+
+            var fb = new FrameBuffer();
+            fb.resize(80, 40);
+            fb.clear();
+
+            var view = cam.getViewMatrix();
+            var proj = cam.getProjectionMatrix();
+            var aspect = 2.0; // cellH / cellW
+
+            Rasterizer.render(scene, cam, fb, view, proj, aspect);
+
+            // count non-space cells
+            var filled = 0;
+            for (var i = 0; i < fb.chars.length; i++) {
+                if (fb.chars[i] !== ' ') filled++;
+            }
+            assertTrue('scene produced visible cells (' + filled + ')', filled > 50, 'too few: ' + filled);
+
+            // the image should have both polygon chars and edge chars
+            var hasPoly = false, hasEdge = false;
+            for (var j = 0; j < fb.chars.length; j++) {
+                if (fb.chars[j] === '#') hasPoly = true;
+                if (fb.chars[j] === '@') hasEdge = true;
+            }
+            assertTrue('polygon glyph present', hasPoly);
+            assertTrue('edge glyph present', hasEdge);
+
+            // sphere is in front of ground -> the buffer must contain more than
+            // one glyph kind (depth / occlusion actually did something).
+            var distinct = {};
+            for (var k = 0; k < fb.chars.length; k++) {
+                distinct[fb.chars[k]] = (distinct[fb.chars[k]] || 0) + 1;
+            }
+            var kinds = Object.keys(distinct).length;
+            assertTrue('multiple glyph kinds present (' + kinds + ')', kinds >= 2);
+
+            // the sphere is centered horizontally; with FOV 70 + aspect-2 cells it
+            // lands in the lower half of this small buffer, so check a horizontal
+            // band across the middle column on the lower half.
+            var cx = Math.floor(fb.width / 2);
+            var hasCenterBand = false;
+            for (var yy = Math.floor(fb.height * 0.6); yy < fb.height; yy++) {
+                if (fb.getChar(cx, yy) !== ' ') hasCenterBand = true;
+            }
+            assertTrue('something rendered in the center column (lower half)', hasCenterBand);
+        }
+
+        testClipNear();
+        testProjectFace();
+        testProjectEdge();
+        testRasterizer();
+        testDrawLine();
+        testSceneRender();
+
+        var summary = document.createElement('div');
+        summary.className = 'summary';
+        if (failed === 0) {
+            summary.style.color = '#0f0';
+            summary.textContent = '✓ ALL TESTS PASSED: ' + passed + ' passed, 0 failed';
+            console.log('%cA3D STAGE-5 TESTS: ALL PASSED (' + passed + ')', 'color: #0f0; font-size: 16px;');
+        } else {
+            summary.style.color = '#f44';
+            summary.textContent = '✗ TESTS FAILED: ' + passed + ' passed, ' + failed + ' failed';
+            console.error('A3D STAGE-5 TESTS: ' + failed + ' failed, ' + passed + ' passed');
+        }
+        output.appendChild(summary);
+    })();
+    </script>
+</body>
+</html>

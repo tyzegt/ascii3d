@@ -41,6 +41,8 @@ A3D.modules.Main = (function () {
             'Scene',
             'SceneLoader',
             'GlyphMap',
+            'Projection',
+            'Rasterizer',
             'FrameBuffer',
             'HUD'
         ];
@@ -124,6 +126,16 @@ A3D.modules.Main = (function () {
             data = list.length > 0 ? R.getScene(list[0]) : { name: 'empty', objects: [] };
         }
         scene = SceneLoader.load(data);
+
+        // apply the scene's saved camera (position + yaw/pitch) if present
+        if (scene && scene.camera && scene.camera.position) {
+            var c = scene.camera;
+            camera.setView(
+                [c.position[0] || 0, c.position[1] || 0, c.position[2] || 0],
+                c.yaw || 0,
+                c.pitch || 0
+            );
+        }
     }
 
     function resize() {
@@ -179,38 +191,17 @@ A3D.modules.Main = (function () {
         ctx.fillStyle = '#0f0';
 
         frameBuffer.clear();
-        drawDemoPattern(frameBuffer);
+
+        if (scene) {
+            var Rasterizer = A3D.modules.Rasterizer;
+            var viewMatrix = camera.getViewMatrix();
+            var projMatrix = camera.getProjectionMatrix();
+            // ascii-ячейка выше, чем шире: компенсируем в проекции по y
+            var aspect = charH / charW;
+            Rasterizer.render(scene, camera, frameBuffer, viewMatrix, projMatrix, aspect);
+        }
+
         frameBuffer.flush(ctx, charW, charH);
-    }
-
-    // Тестовый паттерн этапа 3: рамка + заполнение по модулю —
-    // видно сетку, границы и корректность flush при любом размере окна.
-    function drawDemoPattern(fb) {
-        var w = fb.width;
-        var h = fb.height;
-        var GlyphMap = A3D.modules.GlyphMap;
-
-        for (var y = 0; y < h; y++) {
-            for (var x = 0; x < w; x++) {
-                var ch;
-                if (x === 0 || y === 0 || x === w - 1 || y === h - 1) {
-                    ch = GlyphMap.edge();
-                } else if ((x + y) % 4 === 0) {
-                    ch = GlyphMap.getBase();
-                } else {
-                    continue;
-                }
-                fb.setCell(x, y, ch);
-            }
-        }
-
-        // Крест в центре — проверка координат сетки.
-        var cx = w >> 1;
-        var cy = h >> 1;
-        for (var d = -3; d <= 3; d++) {
-            fb.setCell(cx + d, cy, GlyphMap.edge());
-            fb.setCell(cx, cy + d, GlyphMap.edge());
-        }
     }
 
     if (document.readyState === 'loading') {
