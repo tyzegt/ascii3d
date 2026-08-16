@@ -4,7 +4,7 @@
 > Продолжает этап 7 (`ROADMAP.md`) и раздел 7 `PLAN.md`.
 > Все документы проекта — на русском; этот файл продолжает ту же конвенцию.
 >
-> Прогресс: **Этап A ✅** (per-cell цвет + UV в проекции), **Этап B ✅** (освещение). Следующий — Этап C (текстуры).
+> Прогресс: **Этап A ✅** (per-cell цвет + UV в проекции), **Этап B ✅** (освещение), **Этап C ✅** (текстуры). Следующий — Этап D (интеграция, сцены, документация).
 
 ---
 
@@ -243,19 +243,22 @@ desert/character_demo рендерятся без ошибок консоли)
 ### Этап C — Текстуры
 **Цель:** текстуры на примитивах, разные на разных гранях, перспективная коррекция.
 
-- [ ] `Texture.js`: реестр именованных текстур, `define`, `get`, `sample`, `uvForFaceGroup`.
-- [ ] Примитивы: генерация `faces[i].uv` + `computeFaceGroups()` для Cube/Plane/Pyramid/Sphere.
-- [ ] `Mesh`/примитивы: `material { texture | textures, color }` из `params`; сериализация.
-- [ ] `SceneLoader`: парсинг `texture`/`textures`/`color`.
-- [ ] `Rasterizer`: в `fillPoly` интерполяция `u/w,v/w,1/w` → `u,v` → `Texture.sample`;
-      глиф текстуры, цвет = материал × свет (`Lighting` из этапа B); без света цвет
-      полный.
-- [ ] Тесты: `sample` (границы, clamp), перспективная коррекция (UV в центре/краю
-      грани при ракурсе), round-trip текстуры/материала.
+- [x] `Texture.js`: реестр именованных текстур, `define`, `get`, `sample` (bilinear, clamp),
+      `uvForFaceGroup`, `generateFaceUVs` (ленивая генерация UV на грани по нормали).
+- [x] Примитивы: генерация `faces[i].uv` через `Texture.generateFaceUVs` (лениво в
+      `Rasterizer.render`, т.к. Texture.js грузится после примитивов); `computeFaceGroups()`
+      и `getFaceTextureName()` на Mesh.
+- [x] `Mesh`: `material { texture | textures, color }` из `params`; сериализация в `toJSON()`.
+- [x] `SceneLoader`: парсинг `texture`/`textures`/`color` → `obj.material`.
+- [x] `Rasterizer`: в `fillPoly` параметр `tex` — пересчёт u/w,v/w,1/w → u,v → `Texture.sample`
+      → глиф из RAMP; цвет = материал × свет (`Lighting` из этапа B).
+- [x] Тесты: `sample` (границы, clamp, bilinear), перспективная коррекция (UV в центре грани
+      при ракурсе ≠ наивному среднему), UV генерация для Cube/Plane/Pyramid/Sphere,
+      round-trip текстуры/материала.
 
-**Приёмка:** текстура видна на гранях; разные группы граней — разные текстуры; при
-повороте объекта/камеры узор перспективно сжимается, но остаётся узнаваемым; текстура
-корректно сочетается со светом.
+**Приёмка:** ✅ (проверено через http://ascii3d.local.int/: test 34 / scene_test 83 /
+render_test 145 — все ✓; city_block/desert/light_demo/character_demo рендерятся без ошибок
+консоли; текстуры на гранях работают, перспективная коррекция подтверждена тестами)
 
 ### Этап D — Интеграция, сцены, документация
 **Цель:** фичи встроены в демо и задокументированы.

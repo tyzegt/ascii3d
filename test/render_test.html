@@ -45,6 +45,7 @@
             '../js/scene/SceneLoader.js',
             '../js/render/GlyphMap.js',
             '../js/render/Lighting.js',
+            '../js/render/Texture.js',
             '../js/render/Projection.js',
             '../js/render/Rasterizer.js',
             '../js/render/FrameBuffer.js'
@@ -62,10 +63,12 @@
         var Scene = A3D.modules.Scene;
         var Cube = A3D.modules.Cube;
         var Plane = A3D.modules.Plane;
+        var Pyramid = A3D.modules.Pyramid;
         var FrameBuffer = A3D.modules.FrameBuffer;
         var Projection = A3D.modules.Projection;
         var Rasterizer = A3D.modules.Rasterizer;
         var Lighting = A3D.modules.Lighting;
+        var Texture = A3D.modules.Texture;
         var Config = A3D.modules.Config;
 
         var output = document.getElementById('output');
@@ -678,12 +681,156 @@
             assertTrue('attenuation decreases', Lighting.attenuation(5) < Lighting.attenuation(1));
         }
 
+        // ---------- Texture (этап C) ----------
+        function testTexture() {
+            section('Texture');
+
+            // define + get
+            var tex = Texture.define('test4x4', 4, 4, [
+                '#...',
+                '.#..',
+                '..#.',
+                '...#'
+            ]);
+            assertTrue('define returns texture', !!tex && tex.w === 4 && tex.h === 4);
+            var got = Texture.get('test4x4');
+            assertTrue('get returns defined texture', got === tex);
+            assertTrue('get unknown -> null', Texture.get('nope') === null);
+
+            // sample: corners (clamp) and center
+            // diagonal texture: cell (0,0)='#'(int~1), (3,3)='#'(int~1), others '.'(int~0.1)
+            var c00 = Texture.sample(tex, 0, 0);
+            var c33 = Texture.sample(tex, 1, 1);
+            assertTrue('sample(0,0) high (corner #)', c00 > 0.5, 'got ' + c00);
+            assertTrue('sample(1,1) high (corner #)', c33 > 0.5, 'got ' + c33);
+            // center of texture (u=0.5, v=0.5) → between cells, lower intensity
+            var cMid = Texture.sample(tex, 0.5, 0.5);
+            assertTrue('sample(0.5,0.5) finite', isFinite(cMid));
+            assertTrue('sample(0.5,0.5) in [0,1]', cMid >= 0 && cMid <= 1, 'got ' + cMid);
+
+            // clamp: out-of-range u/v clamps to [0,1]
+            var cNeg = Texture.sample(tex, -0.5, -0.5);
+            var cOver = Texture.sample(tex, 1.5, 1.5);
+            assertTrue('sample clamps negative', isFinite(cNeg) && cNeg >= 0 && cNeg <= 1);
+            assertTrue('sample clamps >1', isFinite(cOver) && cOver >= 0 && cOver <= 1);
+
+            // bilinear: sample at exact pixel center should match that cell
+            // cell (0,0) center is at u = 0.5/4 = 0.125, v = 0.5/4 = 0.125
+            var cPx = Texture.sample(tex, 0.125, 0.125);
+            assertTrue('sample at pixel (0,0) center ~ # intensity', cPx > 0.7, 'got ' + cPx);
+
+            // built-in textures exist
+            assertTrue('built-in brick exists', !!Texture.get('brick'));
+            assertTrue('built-in grass exists', !!Texture.get('grass'));
+            assertTrue('built-in checker exists', !!Texture.get('checker'));
+
+            // glyphIntensity: '#' is high (index 7/9 in RAMP_ORDER), '.' is low, ' ' is 0
+            assertTrue('glyphIntensity(#) > 0.5', Texture.glyphIntensity('#') > 0.5, 'got ' + Texture.glyphIntensity('#'));
+            assertTrue('glyphIntensity(@) = 1 (last in ramp)', Math.abs(Texture.glyphIntensity('@') - 1) < 1e-6);
+            assertTrue('glyphIntensity(.) < glyphIntensity(#)', Texture.glyphIntensity('.') < Texture.glyphIntensity('#'));
+            assertClose('glyphIntensity(space) = 0', Texture.glyphIntensity(' '), 0, 1e-6);
+
+            // uvForFaceGroup: cube groups
+            var cg = Texture.uvForFaceGroup('cube', 'front');
+            assertTrue('uvForFaceGroup cube front', !!cg && cg.faceIndices && cg.faceIndices.length === 2);
+            var cgTop = Texture.uvForFaceGroup('cube', 'top');
+            assertTrue('uvForFaceGroup cube top', !!cgTop && cgTop.faceIndices[0] === 8);
+            assertTrue('uvForFaceGroup cube bad group -> null', Texture.uvForFaceGroup('cube', 'nope') === null);
+            var pg = Texture.uvForFaceGroup('pyramid', 'bottom');
+            assertTrue('uvForFaceGroup pyramid bottom', !!pg && pg.faceIndices.length === 1);
+
+            // ---------- fillPoly with texture: per-cell glyph from texture ----------
+            var fbT = new FrameBuffer();
+            fbT.resize(40, 20);
+            fbT.clear();
+            // triangle covering center; UVs mapping the texture across it
+            var triPts = [
+                { x: 10, y: 5, invW: 0.2, u: 0, v: 0 },
+                { x: 30, y: 5, invW: 0.2, u: 1, v: 0 },
+                { x: 20, y: 15, invW: 0.2, u: 0.5, v: 1 }
+            ];
+            var triUVs = [0, 0, 1, 0, 0.5, 1];
+            // use a high-contrast texture so glyphs vary
+            var contrastTex = Texture.define('contrast', 2, 2, ['#.', '.#']);
+            Rasterizer.fillPoly(fbT, triPts, 'Z', 0, triUVs, null, contrastTex);
+            // count distinct non-space glyphs inside the triangle region
+            var distinctT = {};
+            for (var ti = 0; ti < fbT.chars.length; ti++) {
+                if (fbT.chars[ti] !== ' ') distinctT[fbT.chars[ti]] = true;
+            }
+            var kindsT = Object.keys(distinctT).length;
+            assertTrue('textured fillPoly produces varied glyphs (' + kindsT + ')', kindsT >= 2, JSON.stringify(distinctT));
+
+            // perspective correction: with varying invW, the UV at the centroid
+            // must differ from naive screen-space average (1/w weighting matters).
+            var perspPts = [
+                { x: 10, y: 5, invW: 0.2, u: 0, v: 0 },
+                { x: 30, y: 5, invW: 0.4, u: 1, v: 0 },
+                { x: 20, y: 15, invW: 0.6, u: 0.5, v: 1 }
+            ];
+            var perspUVs = [0, 0, 1, 0, 0.5, 1];
+            var pGrads = Rasterizer.buildUVGradients(perspPts, perspUVs);
+            var pInvW = Rasterizer.computeInvWGradient(perspPts);
+            // screen-space centroid
+            var scx = (perspPts[0].x + perspPts[1].x + perspPts[2].x) / 3;
+            var scy = (perspPts[0].y + perspPts[1].y + perspPts[2].y) / 3;
+            var pcUV = Rasterizer.sampleUV(pGrads, pInvW, scx, scy);
+            assertTrue('perspective sampleUV at centroid not null', !!pcUV);
+            if (pcUV) {
+                // naive screen-space average of corner UVs
+                var naiveU = (0 + 1 + 0.5) / 3;
+                var naiveV = (0 + 0 + 1) / 3;
+                // perspective-correct should differ from naive when invW varies
+                assertTrue('perspective u differs from naive', Math.abs(pcUV.u - naiveU) > 1e-4, 'pc=' + pcUV.u + ' naive=' + naiveU);
+            }
+
+            // ---------- primitive UV generation (этап C) ----------
+            // UV генерируется лениво через Texture.generateFaceUVs (Texture.js
+            // грузится после примитивов — см. index.html).
+            var cube = new Cube();
+            Texture.generateFaceUVs(cube);
+            assertTrue('cube faces have uv', cube.faces[0].uv && cube.faces[0].uv.length === 6);
+            var allUV = true;
+            for (var ci = 0; ci < cube.faces.length; ci++) {
+                if (!cube.faces[ci].uv || cube.faces[ci].uv.length !== 6) { allUV = false; break; }
+            }
+            assertTrue('all cube faces have uv', allUV);
+
+            var plane = new Plane({ segments: 4, size: 10 });
+            Texture.generateFaceUVs(plane);
+            assertTrue('plane faces have uv', plane.faces[0].uv && plane.faces[0].uv.length === 6);
+
+            var pyr = new Pyramid();
+            Texture.generateFaceUVs(pyr);
+            assertTrue('pyramid faces have uv', pyr.faces[0].uv && pyr.faces[0].uv.length === 6);
+
+            var sph = A3D.modules.Sphere;
+            var sphere = new sph({ rings: 6, segments: 8 });
+            Texture.generateFaceUVs(sphere);
+            assertTrue('sphere faces have uv', sphere.faces[0].uv && sphere.faces[0].uv.length === 6);
+
+            // face groups (computeFaceGroups)
+            var cubeGroups = cube.computeFaceGroups();
+            assertTrue('cube has front group', Array.isArray(cubeGroups.front) && cubeGroups.front.length === 2);
+            assertTrue('cube has top group', Array.isArray(cubeGroups.top) && cubeGroups.top.length === 2);
+            assertTrue('cube has back group', Array.isArray(cubeGroups.back) && cubeGroups.back.length === 2);
+
+            // getFaceTextureName: material.texture applies to all faces
+            var cubeT = new Cube({ material: { texture: 'brick' } });
+            assertTrue('material.texture -> face name', cubeT.getFaceTextureName(cubeT.faces[0]) === 'brick');
+            // per-group textures override
+            var cubeG = new Cube({ material: { texture: 'grass', textures: { front: 'window' } } });
+            assertTrue('per-group overrides', cubeG.getFaceTextureName(cubeG.faces[4]) === 'window'); // front is face 4
+            assertTrue('non-overridden uses default', cubeG.getFaceTextureName(cubeG.faces[0]) === 'grass');
+        }
+
         testClipNear();
         testProjectFace();
         testProjectEdge();
         testRasterizer();
         testDrawLine();
         testLighting();
+        testTexture();
         testSceneRender();
 
         var summary = document.createElement('div');

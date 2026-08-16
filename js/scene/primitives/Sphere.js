@@ -9,6 +9,7 @@ A3D.modules.Sphere = (function () {
 
     // UV grid sphere: `rings` latitude bands x `segments` longitude slices.
     // Poles are merged into single vertices (acceptable for ascii resolution).
+    // UV (этап C) генерируется лениво в Rasterizer.render.
     function Sphere(params) {
         params = params || {};
         this.rings = Math.max(2, Math.floor(params.rings || 10));

@@ -43,6 +43,7 @@
             '../js/scene/Scene.js',
             '../js/scene/SceneLoader.js',
             '../js/render/Lighting.js',
+            '../js/render/Texture.js',
             '../scenes/empty.js',
             '../scenes/city_block.js'
         ].forEach(function (p) {
@@ -66,6 +67,7 @@
         var Scene = A3D.modules.Scene;
         var SceneLoader = A3D.modules.SceneLoader;
         var Lighting = A3D.modules.Lighting;
+        var Texture = A3D.modules.Texture;
         var R = A3D.SceneRegistry;
 
         // register types like main.js does
@@ -389,6 +391,55 @@
                 JSON.stringify(lit));
         }
 
+        // ---------- Material / texture: parsing + round-trip (этап C) ----------
+        function testMaterial() {
+            section('Mesh material / texture');
+
+            // SceneLoader parses texture (single) into mesh.material
+            var s1 = SceneLoader.load({
+                name: 'tex', objects: [
+                    { type: 'cube', texture: 'brick' }
+                ]
+            });
+            assertTrue('loader sets material.texture', s1.objects[0].material && s1.objects[0].material.texture === 'brick');
+
+            // SceneLoader parses textures (per-group) + color
+            var s2 = SceneLoader.load({
+                name: 'tex2', objects: [
+                    { type: 'cube', textures: { front: 'window', top: 'grass' }, color: [1, 0.5, 0] }
+                ]
+            });
+            assertTrue('loader sets material.textures.front', s2.objects[0].material && s2.objects[0].material.textures.front === 'window');
+            assertTrue('loader sets material.textures.top', s2.objects[0].material.textures.top === 'grass');
+            assertTrue('loader sets material.color', Array.isArray(s2.objects[0].material.color) && s2.objects[0].material.color[0] === 1);
+
+            // no texture → no material
+            var s3 = SceneLoader.load({ name: 'nt', objects: [{ type: 'cube' }] });
+            assertTrue('no texture -> no material', !s3.objects[0].material);
+
+            // toJSON serializes material (round-trip)
+            var cube = new Cube({ material: { texture: 'brick', textures: { front: 'window' }, color: [0.2, 0.4, 0.6] } });
+            var json = cube.toJSON();
+            assertTrue('toJSON has material.texture', json.material && json.material.texture === 'brick');
+            assertTrue('toJSON has material.textures.front', json.material.textures && json.material.textures.front === 'window');
+            assertTrue('toJSON has material.color', Array.isArray(json.material.color) && json.material.color.length === 3);
+
+            // round-trip: load(toJSON()) preserves material
+            var s4 = SceneLoader.load({ name: 'rt', objects: [json] });
+            assertTrue('round-trip material.texture', s4.objects[0].material && s4.objects[0].material.texture === 'brick');
+            assertTrue('round-trip material.textures.front', s4.objects[0].material.textures.front === 'window');
+            assertClose('round-trip material.color[1]', s4.objects[0].material.color[1], 0.4, 1e-5);
+
+            // getFaceTextureName: per-group overrides default
+            assertTrue('face texture front overridden', s4.objects[0].getFaceTextureName(s4.objects[0].faces[4]) === 'window');
+            assertTrue('face texture back = default', s4.objects[0].getFaceTextureName(s4.objects[0].faces[0]) === 'brick');
+
+            // Texture registry: built-ins available for rendering
+            assertTrue('Texture.get(brick) works', !!Texture.get('brick'));
+            var sampled = Texture.sample(Texture.get('grass'), 0.5, 0.5);
+            assertTrue('Texture.sample finite', isFinite(sampled) && sampled >= 0 && sampled <= 1);
+        }
+
         function testCharacter() {
             section('Character composite');
             var c = Character.build({ name: 'c' });
@@ -447,6 +498,7 @@
         testLoader();
         testRoundTrip();
         testLights();
+        testMaterial();
         testCharacter();
         testMeshIds();
 

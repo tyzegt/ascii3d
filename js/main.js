@@ -43,6 +43,7 @@ A3D.modules.Main = (function () {
             'SceneLoader',
             'GlyphMap',
             'Lighting',
+            'Texture',
             'Projection',
             'Rasterizer',
             'FrameBuffer',

@@ -9,6 +9,7 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
     var GlyphMap = A3D.modules.GlyphMap;
     var Config = A3D.modules.Config;
     var Lighting = A3D.modules.Lighting;
+    var Texture = A3D.modules.Texture;
 
     // 'r,g,b' (0..1, допустимо >1) → [R,G,B] 0..255.
     function rgbTo255(c) {
@@ -26,12 +27,14 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
     //
     // uvs (опц.) — number[], по 2 на вершину (u0,v0, u1,v1, ...). Если заданы,
     // вычисляются перспективно-корректные градиенты u/w и v/w (вместе с 1/w),
-    // и из них в каждой ячейке восстанавливаются u,v. Пока глиф/цвет не зависят
-    // от UV (этап A — только инфраструктура); текстуры подключатся позже.
+    // и из них в каждой ячейке восстанавливаются u,v.
     //
     // color (опц.) — [r,g,b] 0..1: записывается per-cell через setCellColor
     // (освещение, этап B). Без color — setCell (старое поведение, белый цвет).
-    function fillPoly(fb, pts, ch, meshId, uvs, color) {
+    //
+    // tex (опц., этап C) — текстура из Texture.get(): глиф ячейки = символ из
+    // текстуры по восстановленным u,v; без tex — константный ch.
+    function fillPoly(fb, pts, ch, meshId, uvs, color, tex) {
         var n = pts.length;
         if (n < 3) return;
 
@@ -54,9 +57,7 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
         // gradient of invW across the polygon: invW = A*x + B*y + C
         var grad = computeInvWGradient(pts);
 
-        // перспективно-корректные UV (этап A — инфраструктура): если переданы
-        // uvs, строим градиенты u/w и v/w. Пока глиф/цвет не зависят от UV;
-        // текстуры (этап C) будут семплировать по восстановленным u,v.
+        // перспективно-корректные UV: если переданы uvs, строим градиенты u/w и v/w.
         var hasUV = !!(uvs && uvs.length >= n * 2);
         var uvGrads = hasUV ? buildUVGradients(pts, uvs) : null;
 
@@ -89,22 +90,29 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
                     var xc = px + 0.5;
                     var invW = grad.A * xc + grad.B * yc + grad.C;
                     if (invW > 0) {
-                        // перспективно-корректные u,v для ячейки (этап A —
-                        // инфраструктура: пока не влияют на глиф/цвет, но
-                        // восстанавливаются, чтобы текстуры этапа C могли их
-                        // использовать; также покрывается unit-тестами).
-                        if (uvGrads) {
-                            sampleUV(uvGrads, grad, xc, yc);
+                        var cellCh = ch;
+                        if (tex && uvGrads) {
+                            // перспективно-корректные u,v → символ текстуры
+                            var uvPt = sampleUV(uvGrads, grad, xc, yc);
+                            if (uvPt) {
+                                cellCh = textureGlyph(tex, uvPt.u, uvPt.v);
+                            }
                         }
                         if (color) {
-                            fb.setCellColor(px, py, ch, invW, meshId, color[0], color[1], color[2]);
+                            fb.setCellColor(px, py, cellCh, invW, meshId, color[0], color[1], color[2]);
                         } else {
-                            fb.setCell(px, py, ch, invW, meshId);
+                            fb.setCell(px, py, cellCh, invW, meshId);
                         }
                     }
                 }
             }
         }
+    }
+
+    // Символ текстуры по (u,v): bilinear-интенсивность → глиф из RAMP.
+    function textureGlyph(tex, u, v) {
+        var intensity = Texture.sample(tex, u, v);
+        return GlyphMap.byIntensity(intensity);
     }
 
     // Строит перспективно-корректные градиенты u/w и v/w для полигона.
@@ -396,6 +404,13 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
             var verts = mesh.vertices;
             var faces = mesh.faces;
 
+            // ленивая генерация UV (этап C): Texture.js грузится после примитивов,
+            // поэтому f.uv вычисляется здесь на первом рендере и кэшируется.
+            if (!mesh._uvGenerated && Texture && Texture.generateFaceUVs) {
+                Texture.generateFaceUVs(mesh);
+                mesh._uvGenerated = true;
+            }
+
             // transform vertices to world space once
             var worldVerts = new Array(verts.length);
             for (var vi = 0; vi < verts.length; vi++) {
@@ -410,6 +425,9 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
             // цвет материала меша (палитра или mesh.material.color) в 0..1
             var matRGB = materialColor(mesh);
 
+            // кэш текстур по имени (этап C): имя → объект текстуры
+            var texCache = {};
+
             for (var fi = 0; fi < faces.length; fi++) {
                 var f = faces[fi];
                 var i0 = f.indices[0], i1 = f.indices[1], i2 = f.indices[2];
@@ -418,8 +436,7 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
                 // face normal in camera space (for back-face cull)
                 var normalCam = Projection.normalToCamera(f.normal, viewMatrix);
 
-                // uvs: пока null (этап A — примитивы ещё не генерируют faces[i].uv;
-                // этап C добавит UV и передаст их сюда).
+                // UV угла грани (этап C: примитивы генерируют f.uv)
                 var faceUVs = (f && f.uv) ? f.uv : null;
                 var proj = Projection.projectFace(tri, faceUVs, normalCam, viewMatrix, projMatrix, width, height, aspect);
                 if (proj) {
@@ -431,14 +448,27 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
                         (tri[0].z + tri[1].z + tri[2].z) / 3
                     );
                     var light = Lighting.computeFaceLight(nWorld || f.normal, centroid, lights);
-                    // без текстуры: глиф по яркости света (градиент символов),
-                    // цвет = материал × свет (per-cell).
-                    var glyph = GlyphMap.byIntensity(Lighting.luminance(light));
-                    fillPoly(fb, proj.pts, glyph, mesh.meshId || 0, null, [
+
+                    // текстура грани (этап C): имя из material → объект
+                    var faceTex = null;
+                    if (mesh.getFaceTextureName) {
+                        var texName = mesh.getFaceTextureName(f);
+                        if (texName) {
+                            if (!texCache.hasOwnProperty(texName)) {
+                                texCache[texName] = Texture ? Texture.get(texName) : null;
+                            }
+                            faceTex = texCache[texName];
+                        }
+                    }
+
+                    // глиф: с текстурой — символ текстуры (per-cell в fillPoly),
+                    // без — по яркости света (градиент символов).
+                    var baseGlyph = GlyphMap.byIntensity(Lighting.luminance(light));
+                    fillPoly(fb, proj.pts, baseGlyph, mesh.meshId || 0, faceUVs, [
                         matRGB[0] / 255 * light.r,
                         matRGB[1] / 255 * light.g,
                         matRGB[2] / 255 * light.b
-                    ]);
+                    ], faceTex);
                 }
             }
         }

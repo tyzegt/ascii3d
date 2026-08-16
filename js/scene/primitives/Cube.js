@@ -8,6 +8,8 @@ A3D.modules.Cube = (function () {
     var Mesh = A3D.modules.Mesh;
 
     // Unit cube, 8 vertices, 12 triangles (6 faces x 2). CCW from outside.
+    // UV per face corner (этап C) генерируется лениво в Rasterizer.render
+    // (Texture.js грузится после примитивов — см. index.html).
     function Cube(params) {
         params = params || {};
         if (!params.scale) params.scale = [1, 1, 1];

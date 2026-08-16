@@ -68,6 +68,7 @@ A3D.modules.SceneLoader = (function () {
 
         obj.name = (typeof data.name === 'string') ? data.name : '';
         applyTransform(obj, data, index);
+        applyMaterial(obj, data, index);
 
         if (Array.isArray(data.children)) {
             for (var i = 0; i < data.children.length; i++) {
@@ -86,6 +87,28 @@ A3D.modules.SceneLoader = (function () {
             Debug.warn('SceneLoader', 'object #' + index + ': bad transform, using defaults',
                 e && e.message ? e.message : e);
         }
+    }
+
+    // Материал (этап C): texture/textures/color из JSON объекта → obj.material.
+    function applyMaterial(obj, data, index) {
+        if (!obj.isMesh) return;
+        var mat = null;
+        if (typeof data.texture === 'string') {
+            mat = { texture: data.texture };
+        } else if (data.textures && typeof data.textures === 'object' && !Array.isArray(data.textures)) {
+            mat = { textures: {} };
+            for (var g in data.textures) {
+                if (Object.prototype.hasOwnProperty.call(data.textures, g) &&
+                    typeof data.textures[g] === 'string') {
+                    mat.textures[g] = data.textures[g];
+                }
+            }
+        }
+        if (Array.isArray(data.color) && data.color.length >= 3) {
+            if (!mat) mat = {};
+            mat.color = [data.color[0], data.color[1], data.color[2]];
+        }
+        if (mat) obj.material = mat;
     }
 
     // Fetches a scene from a URL (requires a local server; fetch over file:// fails).

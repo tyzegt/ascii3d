@@ -8,6 +8,7 @@ A3D.modules.Plane = (function () {
     var Mesh = A3D.modules.Mesh;
 
     // Ground plane: N x N grid of quads (2 triangles each), normal up (+y).
+    // UV (этап C) генерируется лениво в Rasterizer.render.
     function Plane(params) {
         params = params || {};
         this.segments = Math.max(1, Math.floor(params.segments || 8));

@@ -8,6 +8,7 @@ A3D.modules.Pyramid = (function () {
     var Mesh = A3D.modules.Mesh;
 
     // Square pyramid: 5 vertices (4 base + apex), 5 faces. CCW from outside.
+    // UV per face corner (этап C) генерируется лениво в Rasterizer.render.
     function Pyramid(params) {
         params = params || {};
         if (!params.scale) params.scale = [1, 1, 1];
