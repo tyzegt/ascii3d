@@ -7,6 +7,7 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
     var Vec3 = A3D.modules.Vec3;
     var Projection = A3D.modules.Projection;
     var GlyphMap = A3D.modules.GlyphMap;
+    var Config = A3D.modules.Config;
 
     // Draws one screen-space polygon (2-4 pts with invW) into the frame buffer.
     // Depth = interpolated 1/w (perspective-correct). Writes only where the
@@ -109,6 +110,81 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
         }
     }
 
+    // Axis-aligned bounding box of a mesh in LOCAL space, computed once and cached.
+    function getBoundingBox(mesh) {
+        if (mesh._bbox) return mesh._bbox;
+        var minX = Infinity, minY = Infinity, minZ = Infinity;
+        var maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+        for (var i = 0; i < mesh.vertices.length; i++) {
+            var v = mesh.vertices[i];
+            if (v.x < minX) minX = v.x;
+            if (v.y < minY) minY = v.y;
+            if (v.z < minZ) minZ = v.z;
+            if (v.x > maxX) maxX = v.x;
+            if (v.y > maxY) maxY = v.y;
+            if (v.z > maxZ) maxZ = v.z;
+        }
+        mesh._bbox = { minX: minX, minY: minY, minZ: minZ, maxX: maxX, maxY: maxY, maxZ: maxZ };
+        return mesh._bbox;
+    }
+
+    // Frustum cull: is any part of the mesh's world bounding box on screen?
+    // Tests all 8 corners against the EXACT same screen mapping as
+    // Projection.projectFace (ndc -> [0,width]x[0,height], then y stretched by
+    // cellAspect around the center). A corner inside the window means part of the
+    // object is visible, so we keep it; only cull when every corner is outside.
+    // This is conservative and exact for the trapezoidal perspective window.
+    function boxInFrustum(mesh, wm, viewMatrix, projMatrix, width, height, cellAspect) {
+        var bb = getBoundingBox(mesh);
+        var p = viewMatrix.elements;
+        var m = projMatrix.elements;
+
+        // project a local corner to camera space, then to screen cells
+        function camCorner(x, y, z) {
+            // world = wm * local
+            var wx = wm[0] * x + wm[4] * y + wm[8] * z + wm[12];
+            var wy = wm[1] * x + wm[5] * y + wm[9] * z + wm[13];
+            var wz = wm[2] * x + wm[6] * y + wm[10] * z + wm[14];
+            // camera space
+            return {
+                x: p[0] * wx + p[4] * wy + p[8] * wz + p[12],
+                y: p[1] * wx + p[5] * wy + p[9] * wz + p[13],
+                z: p[2] * wx + p[6] * wy + p[10] * wz + p[14]
+            };
+        }
+
+        // Test points: the 8 box corners PLUS the box center. The center matters
+        // for large flat meshes (e.g. the ground): their corners can all project
+        // off-screen / behind while the middle still fills the view.
+        var xs = [bb.minX, bb.maxX];
+        var ys = [bb.minY, bb.maxY];
+        var zs = [bb.minZ, bb.maxZ];
+        var cxs = [(bb.minX + bb.maxX) / 2];
+        var cys = [(bb.minY + bb.maxY) / 2];
+        var czs = [(bb.minZ + bb.maxZ) / 2];
+
+        function testPoint(x, y, z) {
+            var c = camCorner(x, y, z);
+            if (c.z > -Projection.NEAR_CLIP) return false;
+            var w = -c.z;
+            var ndcX = (m[0] * c.x + m[4] * c.y + m[8] * c.z + m[12]) / w;
+            var ndcY = (m[1] * c.x + m[5] * c.y + m[9] * c.z + m[13]) / w;
+            var sx = (ndcX * 0.5 + 0.5) * width;
+            var sy = (0.5 - ndcY * 0.5) * height * cellAspect;
+            return sx >= 0 && sx <= width && sy >= 0 && sy <= height;
+        }
+
+        for (var i = 0; i < 2; i++) {
+            for (var j = 0; j < 2; j++) {
+                for (var k = 0; k < 2; k++) {
+                    if (testPoint(xs[i], ys[j], zs[k])) return true;
+                }
+            }
+        }
+        // box center (covers large flat geometry whose corners are off-screen)
+        return testPoint(cxs[0], cys[0], czs[0]);
+    }
+
     // Full render: scene -> frame buffer.
     //   scene      - A3D Scene (objects with world matrices updated)
     //   camera     - A3D Camera
@@ -122,11 +198,17 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
         var edgeChar = GlyphMap.edge();
 
         // gather meshes (depth sort back-to-front as a cheap heuristic so the
-        // ascii z-buffer behaves nicely with sparse cells)
+        // ascii z-buffer behaves nicely with sparse cells), frustum-culled
         var meshes = [];
         scene.objects.forEach(function (root) {
+            root.getWorldMatrix();
             root.traverse(function (node) {
-                if (node.isMesh) meshes.push(node);
+                if (!node.isMesh) return;
+                node.getWorldMatrix();
+                var wm = node.worldMatrix.elements;
+                if (boxInFrustum(node, wm, viewMatrix, projMatrix, width, height, aspect)) {
+                    meshes.push(node);
+                }
             });
         });
 
@@ -207,6 +289,8 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
         render: render,
         fillPoly: fillPoly,
         drawLine: drawLine,
-        computeInvWGradient: computeInvWGradient
+        computeInvWGradient: computeInvWGradient,
+        boxInFrustum: boxInFrustum,
+        getBoundingBox: getBoundingBox
     };
 })());

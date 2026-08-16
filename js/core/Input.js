@@ -13,6 +13,7 @@ A3D.modules.Input = (function () {
     var mouseDY = 0;
     var locked = false;
     var canvas = null;
+    var keydownHandlers = [];
 
     var ARROWS = [
         'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space',
@@ -31,13 +32,21 @@ A3D.modules.Input = (function () {
         if (ARROWS.indexOf(e.code) !== -1) {
             e.preventDefault();
         }
-        if (keys[e.code]) {
-            return;
-        }
+        // One-shot actions (save, add object, toggle menu) must fire only on a
+        // genuine press -> release transition. OS auto-repeat (and some browsers'
+        // quirk of not setting e.repeat reliably) otherwise re-triggers them while
+        // a key is held. We latch on the FIRST keydown of a press and release it
+        // on keyup, so repeats / held keys never re-fire.
+        var wasHeld = !!keys[e.code];
         keys[e.code] = true;
-        if (e.code >= 'Digit1' && e.code <= 'Digit9') {
-            var num = parseInt(e.code.charAt(5), 10);
-            Debug.log('Input', 'hotkey: add primitive ' + num);
+        if (!wasHeld && !e.repeat) {
+            for (var i = 0; i < keydownHandlers.length; i++) {
+                try {
+                    keydownHandlers[i](e);
+                } catch (err) {
+                    Debug.error('Input', 'keydown handler failed:', err && err.message ? err.message : err);
+                }
+            }
         }
     }
 
@@ -81,6 +90,14 @@ A3D.modules.Input = (function () {
             canvas.addEventListener('click', onClick);
             document.addEventListener('pointerlockchange', onPointerLockChange);
             Debug.log('Input', 'initialized');
+        },
+
+        // Registers a one-shot keydown handler (fires on every key-down,
+        // independent of key repeat / held state).
+        onKeydown: function (fn) {
+            if (typeof fn === 'function') {
+                keydownHandlers.push(fn);
+            }
         },
 
         isDown: function (code) {

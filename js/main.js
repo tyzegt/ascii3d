@@ -12,6 +12,7 @@ A3D.modules.Main = (function () {
     var camera = null;
     var input = null;
     var hud = null;
+    var menu = null;
     var frameBuffer = null;
     var scene = null;
     var charW = 0;
@@ -44,7 +45,8 @@ A3D.modules.Main = (function () {
             'Projection',
             'Rasterizer',
             'FrameBuffer',
-            'HUD'
+            'HUD',
+            'SceneMenu'
         ];
 
         var missing = expected.filter(function (name) {
@@ -66,6 +68,7 @@ A3D.modules.Main = (function () {
         camera = new A3D.modules.Camera();
         input = A3D.modules.Input;
         hud = A3D.modules.HUD;
+        menu = A3D.modules.SceneMenu;
         frameBuffer = new A3D.modules.FrameBuffer();
 
         registerPrimitiveTypes();
@@ -77,15 +80,9 @@ A3D.modules.Main = (function () {
         input.init(canvas);
         hud.init();
         hud.setSceneName(scene ? scene.name : 'default');
+        menu.init(onMenuPick);
 
-        document.addEventListener('keydown', function (e) {
-            if (e.code === 'KeyR') {
-                camera.reset();
-                Debug.log('Main', 'camera reset');
-            } else if (e.code === 'KeyH') {
-                hud.toggle();
-            }
-        });
+        input.onKeydown(onHotkey);
 
         var loaded = Object.keys(A3D.modules).sort();
         Debug.log('Main', 'loaded modules:', loaded.join(', '));
@@ -112,7 +109,6 @@ A3D.modules.Main = (function () {
 
     // ?scene=<name> picks a registered scene; default is the first one.
     function loadSceneFromURLParam() {
-        var SceneLoader = A3D.modules.SceneLoader;
         var R = A3D.SceneRegistry;
         var name = null;
         try {
@@ -125,9 +121,57 @@ A3D.modules.Main = (function () {
             var list = R.listScenes();
             data = list.length > 0 ? R.getScene(list[0]) : { name: 'empty', objects: [] };
         }
-        scene = SceneLoader.load(data);
+        applyScene(A3D.modules.SceneLoader.load(data));
+    }
 
-        // apply the scene's saved camera (position + yaw/pitch) if present
+    // One-shot hotkeys: menu, camera reset, HUD, add primitive, save scene.
+    function onHotkey(e) {
+        if (e.code === 'Tab') {
+            menu.toggle();
+            return;
+        }
+        if (menu.isOpen()) {
+            if (e.code === 'Escape' || e.code === 'Enter') {
+                e.preventDefault();
+                if (e.code === 'Enter') {
+                    menu.activate();
+                } else {
+                    menu.toggle();
+                }
+            } else if (e.code === 'ArrowUp') {
+                e.preventDefault();
+                menu.move(-1);
+            } else if (e.code === 'ArrowDown') {
+                e.preventDefault();
+                menu.move(1);
+            }
+            return;
+        }
+        if (e.code === 'KeyR') {
+            camera.reset();
+            Debug.log('Main', 'camera reset');
+        } else if (e.code === 'KeyH') {
+            hud.toggle();
+        } else if (e.code === 'KeyS') {
+            saveScene();
+        } else if (e.code >= 'Digit1' && e.code <= 'Digit9') {
+            var num = parseInt(e.code.charAt(5), 10);
+            addPrimitiveByHotkey(num);
+        }
+    }
+
+    // Scene picked from the Tab menu: name (built-in) or raw data (file).
+    function onMenuPick(name, rawData) {
+        var data = rawData || (name ? A3D.SceneRegistry.getScene(name) : null);
+        if (!data) {
+            Debug.warn('Main', 'menu pick: unknown scene "' + name + '"');
+            return;
+        }
+        applyScene(A3D.modules.SceneLoader.load(data));
+    }
+
+    function applyScene(newScene) {
+        scene = newScene;
         if (scene && scene.camera && scene.camera.position) {
             var c = scene.camera;
             camera.setView(
@@ -135,6 +179,64 @@ A3D.modules.Main = (function () {
                 c.yaw || 0,
                 c.pitch || 0
             );
+        }
+        hud.setSceneName(scene ? scene.name : 'default');
+        Debug.log('Main', 'scene loaded: "' + (scene && scene.name) + '"');
+    }
+
+    // Hotkeys 1-9 spawn a primitive in front of the camera.
+    var HOTKEY_PRIMITIVES = ['cube', 'sphere', 'pyramid', 'plane', 'character'];
+
+    function addPrimitiveByHotkey(num) {
+        if (!scene) return;
+        var type = HOTKEY_PRIMITIVES[num - 1];
+        if (!type || !A3D.SceneRegistry.hasType(type)) {
+            Debug.warn('Main', 'hotkey ' + num + ': no primitive assigned');
+            return;
+        }
+        try {
+            var obj = A3D.SceneRegistry.create(type, {});
+            if (!obj) return;
+
+            // place ~4 units in front of the camera, dropped to y=0 for ground types
+            var fwd = camera.forward();
+            var pos = [
+                camera.position.x + fwd.x * 4,
+                camera.position.y + fwd.y * 4,
+                camera.position.z + fwd.z * 4
+            ];
+            if (type === 'plane') {
+                pos[1] = 0;
+            } else if (type !== 'sphere') {
+                pos[1] = Math.max(0, pos[1]);
+            }
+            obj.name = type + '_' + (scene.objects.length + 1);
+            obj.setTransform(pos, null, null);
+            scene.add(obj);
+            Debug.log('Main', 'added "' + obj.name + '" (' + type + ') at [' +
+                pos[0].toFixed(2) + ', ' + pos[1].toFixed(2) + ', ' + pos[2].toFixed(2) + ']');
+        } catch (e) {
+            Debug.error('Main', 'hotkey add failed:', e && e.message ? e.message : e);
+        }
+    }
+
+    // Saves the current scene as a downloadable JSON file (works on file:// too).
+    function saveScene() {
+        if (!scene) return;
+        try {
+            var json = JSON.stringify(scene.toJSON(), null, 2);
+            var blob = new Blob([json], { type: 'application/json' });
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = url;
+            a.download = (scene.name || 'scene') + '.json';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+            Debug.log('Main', 'scene saved: ' + a.download + ' (' + json.length + ' bytes)');
+        } catch (e) {
+            Debug.error('Main', 'save failed:', e && e.message ? e.message : e);
         }
     }
 
