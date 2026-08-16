@@ -14,6 +14,7 @@ A3D.modules.Config = (function () {
         SENSITIVITY: 0.003,
         MAX_DT: 0.1,
         PITCH_LIMIT: MathUtils.degToRad(89),
+        DEFAULT_SCENE: 'city_block',
         GLYPH_MAP: {
             base: '#',
             edge: '@',

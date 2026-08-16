@@ -107,7 +107,7 @@ A3D.modules.Main = (function () {
         R.register('character', function (p) { return A3D.modules.Character.build(p); });
     }
 
-    // ?scene=<name> picks a registered scene; default is the first one.
+    // ?scene=<name> picks a registered scene; default is Config.DEFAULT_SCENE.
     function loadSceneFromURLParam() {
         var R = A3D.SceneRegistry;
         var name = null;
@@ -118,8 +118,7 @@ A3D.modules.Main = (function () {
 
         var data = (name && R.getScene(name)) ? R.getScene(name) : null;
         if (!data) {
-            var list = R.listScenes();
-            data = list.length > 0 ? R.getScene(list[0]) : { name: 'empty', objects: [] };
+            data = R.getScene(A3D.modules.Config.DEFAULT_SCENE) || { name: 'empty', objects: [] };
         }
         var loaded = A3D.modules.SceneLoader.load(data);
         if (loaded) loaded.assignMeshIds();
