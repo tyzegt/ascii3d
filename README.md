@@ -1,151 +1,171 @@
 # ASCII 3D
 
-3D-движок на чистом HTML + JavaScript. Вся графика — ASCII-символы, отрисованные
-на `<canvas>`. Никаких зависимостей, веб-глиз или билдов: открывается как обычный
-`index.html` (двойной клик) или через любой статический сервер. Адаптивен под
-размер окна и hiDPI (`devicePixelRatio`).
+A 3D engine built with plain HTML + JavaScript (ES5, no ES modules). All graphics
+are ASCII characters drawn on a `<canvas>`: every character in the terminal grid is
+a "pixel", and each mesh is rendered in its own color from a palette
+(`Config.MESH_PALETTE`). No dependencies, no build. Adapts to the window size and
+hiDPI (`devicePixelRatio`).
 
-Каждый символ в терминальной сетке — «пиксель». Разрешение = размер canvas,
-делённый на ширину/высоту ascii-ячейки (замер через `ctx.measureText`).
+Each character in the terminal grid is a "pixel". Resolution = canvas size divided
+by the ASCII cell width/height (measured via `ctx.measureText`).
 
-## Запуск
+## Running
 
-Просто откройте `index.html` в браузере. Для загрузки внешних JSON-сцен через
-URL (необязательно) поднимите любой статический сервер:
+The app is hosted on IIS: the working directory is mapped as a site with caching
+disabled (`web.config`) — open it at `http://ascii3d.local.int/`. Do not use
+`file://` or ad-hoc static servers for verification.
 
-```
-python -m http.server
-# или
-npx serve
-```
+Built-in scenes, loading from file (`<input type="file">`) and saving to JSON work
+regardless; the IIS address is the canonical way to run and verify.
 
-Встроенные сцены и загрузка из файла (`<input type="file">`) работают и на
-`file://`.
+## Controls
 
-## Управление
-
-| Клавиша | Действие |
+| Key | Action |
 |---|---|
-| `W A S D` | движение вперёд/влево/назад/вправо (strafe) |
-| `Q` / `E` | вниз / вверх |
-| Стрелки | альтернатива: ↑/↓ — вперёд/назад, ←/→ — поворот (yaw) |
-| `Z` / `X` | наклон камеры вверх / вниз (pitch), обзор без мыши |
-| Мышь (клик по canvas) | обзор через Pointer Lock; повторный клик после ESC возвращает lock |
-| `1`–`5` | добавить объект перед камерой: 1 куб, 2 сфера, 3 пирамида, 4 плоскость, 5 персонаж |
-| `Tab` | меню сцен (↑/↓ — выбор, Enter — загрузить, Esc — закрыть) |
-| `R` | сброс камеры |
-| `H` | показать/скрыть HUD |
-| `S` | сохранить текущую сцену в JSON-файл (Blob download) |
+| `W A S D` | move forward/left/back/right (strafe) |
+| `Q` / `E` | down / up |
+| Arrow keys | alternative: ↑/↓ — forward/back, ←/→ — turn camera (yaw), accelerated |
+| `Z` / `X` | tilt camera up / down (pitch) — mouse-free look |
+| Mouse (click on canvas) | look around via Pointer Lock; click again after ESC to re-lock |
+| `1`–`5` | add an object in front of the camera: 1 cube, 2 sphere, 3 pyramid, 4 plane, 5 character |
+| `Tab` | scene menu (↑/↓ — select, Enter — load, Esc — close) |
+| `R` | reset camera |
+| `H` | show/hide HUD |
+| `P` | save the current scene to a JSON file (Blob download) |
 
-Скорость, чувствительность, FOV, near/far — константы в `js/core/Config.js`
-(дефолты: FOV 70°, near 0.1, far 500, speed 8, sensitivity 0.003).
+Speed, sensitivity, FOV, near/far are constants in `js/core/Config.js`
+(defaults: FOV 70°, near 0.1, far 500, speed 8, sensitivity 0.003; plus
+`TURN_SPEED`/`LOOK_SPEED` for keyboard turning and `DEFAULT_SCENE`).
 
-## Сцены
+## Scenes
 
-Встроенные сцены регистрируются в реестре (`scenes/*.js`) и доступны из меню (Tab)
-или по URL-параметру `?scene=<имя>`:
+Built-in scenes are registered in the registry (`scenes/*.js`) and available from
+the menu (Tab) or via the URL parameter `?scene=<name>`:
 
-- `empty` — пустая сцена;
-- `city_block` — городок: здания, купол, пирамида, персонаж, сфера;
-- `desert` — пустыня: пирамиды, камни, бегун, оазис;
-- `character_demo` — три персонажа разного масштаба + декор.
+- `empty` — an empty scene;
+- `city_block` — a small town: buildings, dome, pyramid, character, sphere
+  (**the default scene**, `Config.DEFAULT_SCENE`);
+- `desert` — a desert: pyramids, rocks, a runner, an oasis;
+- `character_demo` — three characters of different scales + decor.
 
-Загрузка внешней сцены: меню (Tab) → «Load from file…» → выбрать `.json`.
-Сохранение: клавиша `S` скачивает текущую сцену как `<имя>.json`
-(`Scene.toJSON()` round-trip совместима с `SceneLoader.load`).
+Loading an external scene: menu (Tab) → "Load from file…" → pick a `.json`.
+Saving: the `P` key downloads the current scene as `<name>.json`
+(`Scene.toJSON()` round-trip is compatible with `SceneLoader.load`).
 
-Формат сцены — JSON: `name`, `camera {position, yaw, pitch}`, `objects[]`
-(рекурсивно, `type` + `position/rotation/scale` + `children`). Пример —
+Scene format — JSON: `name`, `camera {position, yaw, pitch}`, `objects[]`
+(recursively, `type` + `position/rotation/scale` + `children`). Example —
 `scenes/city_block.js`.
 
-## Архитектура
+## Architecture
 
-Все модули вешают себя на глобальный namespace `window.A3D.modules` (классические
-`<script>` без ES-модулей — надёжно работает из двойного клика по `index.html`).
-Порядок подключения: `utils → core → scene → render → ui → scenes → main`.
+All modules are IIFEs that attach themselves to the global namespace
+`window.A3D.modules` (classic `<script>` tags, no ES modules). Load order:
+`utils → core → scene → render → ui → scenes → main`.
+
+At startup `js/main.js` checks the list of loaded modules against an internal
+`expected` list — any new module must be added there too, otherwise boot aborts
+with a "missing modules" error. Scenes are registered in the registry via
+`A3D.SceneRegistry`.
 
 ```
 ascii3d/
-├── index.html          # точка входа, canvas, подключение скриптов
-├── css/style.css       # полноэкранный canvas, monospace, overflow:hidden
-├── scenes/             # встроенные сцены (регистрируют себя в реестре)
+├── index.html          # entry point, canvas, script includes
+├── web.config          # IIS: disable static caching (ascii3d.local.int)
+├── css/style.css       # fullscreen canvas, monospace, overflow:hidden
+├── scenes/             # built-in scenes (register themselves in the registry)
 │   ├── empty.js
 │   ├── city_block.js
 │   ├── desert.js
 │   └── character_demo.js
 └── js/
-    ├── main.js         # инициализация, game loop, связка модулей
+    ├── main.js         # initialization, game loop, module wiring
     ├── core/
-    │   ├── Vec3.js     # вектор: add/sub/scale/dot/cross/normalize/length/transform
+    │   ├── Vec3.js     # vector: add/sub/scale/dot/cross/normalize/length/transform
     │   ├── Mat4.js     # 4x4 (column-major): perspective, lookAt, translate, rotate, scale, multiply, invert
-    │   ├── Camera.js   # position/yaw/pitch/fov; move*, rotate, lookAt, getViewMatrix
-    │   ├── Input.js    # клавиатура + мышь (Pointer Lock), onKeydown-хендлеры
+    │   ├── Camera.js   # position/yaw/pitch/fov; move*, rotate, setView, getViewMatrix
+    │   ├── Input.js    # keyboard + mouse (Pointer Lock), onKeydown handlers, auto-repeat guard
     │   ├── MathUtils.js# clamp, lerp, degToRad
-    │   └── Config.js   # константы: FOV, near/far, speed, sensitivity, GlyphMap
+    │   └── Config.js   # constants: FOV, near/far, speed, sensitivity, TURN/LOOK_SPEED, DEFAULT_SCENE, GlyphMap, MESH_PALETTE
     ├── scene/
-    │   ├── Scene.js        # список объектов, update(dt), toJSON (round-trip)
-    │   ├── Object3D.js     # position/rotation/scale, children, worldMatrix (lazy по dirty)
-    │   ├── SceneLoader.js  # JSON → объекты через реестр типов; обработка ошибок
-    │   ├── SceneRegistry.js# реестр типов примитивов + готовых сцен
+    │   ├── Scene.js        # object list, update(dt), assignMeshIds, countFaces, toJSON (round-trip)
+    │   ├── Object3D.js     # position/rotation/scale, children, worldMatrix (lazy via dirty; mutate only through setTransform/markDirty)
+    │   ├── SceneLoader.js  # JSON → objects via the type registry; error handling
+    │   ├── SceneRegistry.js# registry of primitive types + ready-made scenes
     │   └── primitives/
     │       ├── Mesh.js     # vertices/faces, computeNormals (CCW), getEdges
-    │       ├── Cube.js     # 8 вершин, 12 треугольников
-    │       ├── Plane.js    # сетка quad'ов-земли, нормаль +y
-    │       ├── Sphere.js   # UV-сетка rings×segments
-    │       ├── Pyramid.js  # 5 вершин, 5 граней
-    │       ├── Group.js    # контейнер для составных объектов
-    │       └── Character.js# пример: Group → Cube (тело) + Sphere (голова)
+    │       ├── Cube.js     # 8 vertices, 12 triangles
+    │       ├── Plane.js    # ground grid of quads, normal +y
+    │       ├── Sphere.js   # UV mesh rings×segments
+    │       ├── Pyramid.js  # 5 vertices, 5 faces
+    │       ├── Group.js    # container for composite objects
+    │       └── Character.js# example: Group → Cube (body) + Sphere (head)
     ├── render/
     │   ├── Projection.js   # world → camera → near-clip (Sutherland–Hodgman) → ndc → screen
-    │   ├── Rasterizer.js   # scanline, интерполяция 1/w, z-buffer, frustum culling, проход рёбер
-    │   ├── GlyphMap.js     # символы по интенсивности (RAMP), base/edge/empty
-    │   └── FrameBuffer.js  # 2D-массив chars + depth (1/w), clear/setCell/flush
+    │   ├── Rasterizer.js   # scanline, 1/w interpolation, z-buffer, frustum culling, back-to-front sort, edge pass
+    │   ├── GlyphMap.js     # glyphs by intensity (RAMP), base/edge/empty
+    │   └── FrameBuffer.js  # 2D arrays chars + depth (1/w) + ids (meshId), clear/setCell/flush
     ├── ui/
-    │   ├── HUD.js          # оверлей: FPS, позиция, сцена, grid, подсказки
-    │   └── SceneMenu.js    # Tab-меню сцен + «Load from file…»
+    │   ├── HUD.js          # overlay: FPS, position, yaw/pitch (in degrees), scene, grid+faces, hints
+    │   └── SceneMenu.js    # Tab scene menu + "Load from file…"
     └── utils/
-        ├── Colors.js       # заготовка под освещение (Ламберт + ambient)
-        └── Debug.js        # console.log с тегами, вкл/выкл
+        ├── Colors.js       # stub for lighting (Lambert + ambient)
+        └── Debug.js        # console.log with tags, on/off
 ```
 
-### Конвейер рендеринга
+### Rendering pipeline
 
-1. **FrameBuffer** — 2D-массив символов + глубина (`Float32Array`, `Infinity` = пусто),
-   очистка каждый кадр.
-2. **Projection** — для каждой грани: мировые вершины → камера → near-clip
-   (Sutherland–Hodgman) → перспективное деление (`1/w`) → экран с коррекцией
-   аспекта ascii-ячейки (~1:2).
-3. **Rasterizer** — обход по сканлайнам, интерполяция `1/w` (единственный
-   корректный вариант для перспективы), z-buffer; back-face culling по нормали в
-   camera-space; frustum culling по bounding-sphere меша; отдельный проход рёбер
-   (`@`) для читаемости форм.
-4. **flush** — строки из буфера выводятся на canvas `fillText` построчно (меньше
-   вызовов).
+1. **FrameBuffer** — 2D arrays of glyphs, depth (`Float32Array`) and `meshId`
+   (`Int32Array`, `-1` = empty); cleared every frame.
+2. **Mesh gathering** — collect all meshes in the scene, frustum cull by world
+   bounding-box (clipped against the 6 view-frustum planes), sort back-to-front
+   by each mesh's nearest point to the camera (a cheap heuristic for the sparse
+   ASCII z-buffer).
+3. **Projection** — for each face: world vertices → camera → near-clip
+   (Sutherland–Hodgman) → perspective divide (`1/w`) → screen with an ASCII-cell
+   aspect correction (~1:2).
+4. **Rasterizer** — scanline traversal, `1/w` interpolation (the only correct
+   option for perspective); the z-buffer keeps the **maximum** `1/w` (closer =
+   larger `1/w`), i.e. the nearer point wins; back-face culling by the
+   camera-space normal; a separate edge pass (`@`) for readable shapes.
+5. **flush** — buffer rows are drawn to the canvas with `fillText` row by row,
+   splitting runs of one color (meshId) by the `Config.MESH_PALETTE` palette.
 
-### Контракты между модулями (стабильные интерфейсы)
+### Inter-module contracts (stable interfaces)
 
 - `Primitive` → `{ vertices: Vec3[], faces: {indices:[i0,i1,i2], normal}[] , computeNormals() }`
-- `Renderer.render(scene, camera, frameBuffer, viewMatrix, projMatrix, aspect)`
-- `Object3D.getWorldMatrix()` — единый источник трансформаций
+- `Rasterizer.render(scene, camera, frameBuffer, viewMatrix, projMatrix, aspect)`
+- `Object3D.getWorldMatrix()` — the single source of transformations
 - `SceneLoader.load(jsonData) → Scene`, `Scene.toJSON()` — round-trip
 
-### Расширяемость (заготовки под будущие фичи)
+### How to extend
 
-- **Освещение** — `utils/Colors.js`: Ламберт + ambient; в будущем Rasterizer будет
-  выбирать символ из `GlyphMap.RAMP` по интенсивности грани.
-- **Прозрачность** — флаг `transparent` + сортировка back-to-front, смешивание символов.
-- **Текстуры** — UV-координаты вершин → выбор символа из 2D-текстуры.
-- **Кватернионы / LOD / пикер объектов (raycast)** — см. `PLAN.md`, раздел 7.
+- **New primitive** — create `js/scene/primitives/X.js`, register it with one line
+  in `registerPrimitiveTypes()` (`js/main.js`), add its name to the `expected` list
+  and a `<script>` tag in `index.html`.
+- **New built-in scene** — `scenes/x.js` calling
+  `A3D.SceneRegistry.registerScene(name, data)` + a `<script>` tag in `index.html`.
 
-## Тесты
+### Stubs for future features (stage 7)
 
-Юнит-проверки в `test/` (assert-функции, результат — в консоли и на странице):
+- **Lighting** — `utils/Colors.js`: Lambert + ambient; the Rasterizer will later
+  pick a glyph from `GlyphMap.RAMP` by face intensity.
+- **Transparency** — a `transparent` flag + back-to-front sorting, glyph blending.
+- **Textures** — vertex UV coordinates → picking a glyph from a 2D texture.
+- **Quaternions / LOD / object picker (raycast)** — see `PLAN.md`, section 7.
 
-- `test/test.html` — математическое ядро (Vec3, Mat4);
-- `test/scene_test.html` — сцена, примитивы, нормали, реестр, лоадер, round-trip;
-- `test/render_test.html` — проекция, near-clip, растеризация.
+## Tests
 
-## Статус
+Tests are browser HTML pages (assert functions; the summary line goes to the
+console and the page), not a test runner; each includes the scripts it needs:
 
-MVP завершён (этапы 0–6 из `ROADMAP.md`): движение, обзор, несколько сцен,
-добавление объектов, сохранение/загрузка сцены, оптимизации (back-face, frustum).
+- `test/test.html` — the math core (Vec3, Mat4);
+- `test/scene_test.html` — scene, primitives, normals, registry, loader, round-trip;
+- `test/render_test.html` — projection, near-clip, rasterization.
+
+## Status
+
+MVP is complete (stages 0–6 of `ROADMAP.md`): movement/look (mouse + keyboard),
+4 built-in scenes, adding objects via hotkeys 1–5, scene save/load, per-mesh
+colored rendering by palette, optimizations (back-face, frustum culling,
+back-to-front sort), and fixes to the z-test and frustum culling of flat meshes.
+Next — stage 7 (lighting, transparency, textures).
