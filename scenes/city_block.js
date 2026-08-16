@@ -5,7 +5,10 @@ A3D.SceneRegistry.registerScene('city_block', {
     name: 'city_block',
     camera: { position: [0, 5, 20], yaw: 0, pitch: -0.2 },
     objects: [
-        { "type": "plane", "name": "ground", "segments": 16, "size": 60 },
+        // Большой плоский мир: при размере ~60 игрок у края (x≈±30) при наклоне
+        // вниз смотрит ЗА грань и видит чёрный фон («просвечивание»). 200 единиц
+        // — этого не достичь на текущей скорости, а сегментов всего 256.
+        { "type": "plane", "name": "ground", "segments": 16, "size": 200 },
         {
             "type": "group",
             "name": "building_1",

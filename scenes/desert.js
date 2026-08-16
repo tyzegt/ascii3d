@@ -5,7 +5,8 @@ A3D.SceneRegistry.registerScene('desert', {
     name: 'desert',
     camera: { position: [0, 1.8, 7], yaw: 0, pitch: -0.18 },
     objects: [
-        { "type": "plane", "name": "sand", "segments": 16, "size": 80 },
+        // Большой мир: см. city_block — маленький размер даёт «просвечивание» у края.
+        { "type": "plane", "name": "sand", "segments": 16, "size": 200 },
         // pyramids of the desert (clustered ahead of the camera)
         { "type": "pyramid", "name": "pyr_big",   "position": [-5, 0, -8],  "scale": [6, 5, 6] },
         { "type": "pyramid", "name": "pyr_mid",   "position": [5, 0, -10],  "scale": [4.5, 3.8, 4.5] },

@@ -15,7 +15,11 @@ var Projection = (A3D.modules.Projection = (function () {
     }
 
     // Small safety margin so vertices exactly at z=0 never divide by zero.
-    var NEAR_CLIP = 0.05;
+    // Must stay >= the projection's near plane (Config.NEAR): clipping closer
+    // than the matrix actually uses leaves points with w < 0 after the real
+    // clip, which makes interpolated 1/w go negative across a cell and the
+    // rasterizer drops those cells (visible as holes in large flat meshes).
+    var NEAR_CLIP = Math.max(A3D.modules.Config.NEAR, 0.05);
 
     function lerpVerts(a, b, t) {
         return new CVertex(
@@ -30,7 +34,7 @@ var Projection = (A3D.modules.Projection = (function () {
     // the camera when z_cam <= -clipZ (i.e. w = -z_cam >= clipZ > 0).
     // Returns CVertex[] (3-4 verts) or null if fully behind / degenerate.
     function clipNear(verts, near) {
-        var clipW = (near === undefined) ? NEAR_CLIP : near;
+        var clipW = (near === undefined) ? NEAR_CLIP : Math.max(near, 1e-6);
         var out = [];
         var len = verts.length;
 
@@ -95,7 +99,10 @@ var Projection = (A3D.modules.Projection = (function () {
             return null;
         }
 
-        var clipped = clipNear(cam);
+        // Clip exactly at the projection matrix's near plane (passed by the
+        // caller, which also built the matrix), so no surviving vertex can end
+        // up behind that plane. Fallback NEAR_CLIP is >= Config.NEAR anyway.
+        var clipped = clipNear(cam, projMatrix.near);
         if (!clipped) {
             return null;
         }

@@ -105,7 +105,13 @@ A3D.modules.Camera = (function () {
     };
 
     Camera.prototype.getProjectionMatrix = function () {
-        return Mat4.perspective(this.fov, this.aspect, this.near, this.far);
+        var m = Mat4.perspective(this.fov, this.aspect, this.near, this.far);
+        // The near/far distances the matrix was built from; consumers (e.g.
+        // Projection.clipNear) must clip against these exact values so that a
+        // clipped vertex can never end up behind the plane the matrix uses.
+        m.near = this.near;
+        m.far = this.far;
+        return m;
     };
 
     Camera.prototype.setView = function (position, yaw, pitch) {

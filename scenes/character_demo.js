@@ -5,7 +5,8 @@ A3D.SceneRegistry.registerScene('character_demo', {
     name: 'character_demo',
     camera: { position: [0, 3, 12], yaw: 0, pitch: -0.1 },
     objects: [
-        { "type": "plane", "name": "floor", "segments": 12, "size": 40 },
+        // Большой мир: см. city_block — маленький размер даёт «просвечивание» у края.
+        { "type": "plane", "name": "floor", "segments": 16, "size": 200 },
         // a row of characters at different scales to show composition
         { "type": "character", "name": "hero",     "position": [-6, 0, 0], "scale": [1.2, 1.2, 1.2] },
         { "type": "character", "name": "companion","position": [0, 0, 0] },
