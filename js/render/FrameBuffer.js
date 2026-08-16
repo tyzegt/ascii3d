@@ -12,6 +12,7 @@ A3D.modules.FrameBuffer = (function () {
         this.height = 0;
         this.chars = null;   // String, w*h
         this.depth = null;   // Float32Array, w*h (1/w, Infinity = пусто)
+        this.ids = null;     // Int32Array, w*h (meshId ячейки, -1 = пусто)
     }
 
     FrameBuffer.prototype.resize = function (w, h) {
@@ -30,6 +31,10 @@ A3D.modules.FrameBuffer = (function () {
         for (var j = 0; j < n; j++) {
             this.depth[j] = Infinity;
         }
+        this.ids = new Int32Array(n);
+        for (var k = 0; k < n; k++) {
+            this.ids[k] = -1;
+        }
     };
 
     FrameBuffer.prototype.clear = function () {
@@ -41,9 +46,12 @@ A3D.modules.FrameBuffer = (function () {
             this.chars[i] = empty;
         }
         this.depth.fill(Infinity);
+        if (this.ids) {
+            this.ids.fill(-1);
+        }
     };
 
-    FrameBuffer.prototype.setCell = function (x, y, ch, depth) {
+    FrameBuffer.prototype.setCell = function (x, y, ch, depth, meshId) {
         if (!this.chars) {
             return;
         }
@@ -57,6 +65,9 @@ A3D.modules.FrameBuffer = (function () {
         if (depth === undefined || depth < this.depth[i]) {
             this.chars[i] = ch;
             this.depth[i] = depth;
+            if (this.ids) {
+                this.ids[i] = (meshId === undefined) ? -1 : meshId;
+            }
         }
     };
 
@@ -78,8 +89,9 @@ A3D.modules.FrameBuffer = (function () {
         return this.depth[y * this.width + x];
     };
 
-    // Отрисовка на canvas построчно — один fillText на строку (быстрее, чем по ячейкам).
-    FrameBuffer.prototype.flush = function (ctx, charW, charH) {
+    // Отрисовка на canvas: строка разбивается на прогалины одного цвета
+    // (meshId), каждый run — отдельный fillText со своим ctx.fillStyle.
+    FrameBuffer.prototype.flush = function (ctx, charW, charH, palette) {
         if (!this.chars || !charW || !charH) {
             return;
         }
@@ -88,16 +100,34 @@ A3D.modules.FrameBuffer = (function () {
         var fontPx = Math.max(1, Math.round(charH));
         ctx.font = fontPx + 'px monospace';
         ctx.textBaseline = 'top';
+        var baseColor = (palette && palette.length > 0) ? palette[0] : Config.GLYPH_MAP.empty;
 
         for (var y = 0; y < h; y++) {
-            var row = '';
             var offset = y * w;
-            for (var x = 0; x < w; x++) {
+            var x = 0;
+            while (x < w) {
                 var ch = this.chars[offset + x];
-                row += (ch === Config.GLYPH_MAP.empty) ? ' ' : ch;
+                if (ch === Config.GLYPH_MAP.empty) {
+                    x++;
+                    continue;
+                }
+                var runStart = x;
+                var id = (this.ids) ? this.ids[offset + x] : -1;
+                while (x < w) {
+                    var c2 = this.chars[offset + x];
+                    if (c2 === Config.GLYPH_MAP.empty) break;
+                    var id2 = (this.ids) ? this.ids[offset + x] : -1;
+                    if (id2 !== id) break;
+                    x++;
+                }
+                var run = '';
+                for (var r = runStart; r < x; r++) {
+                    run += this.chars[offset + r];
+                }
+                ctx.fillStyle = (palette && id >= 0 && id < palette.length) ? palette[id] : baseColor;
+                // рисуем все прогалины, включая пустые — пробелы важны для фона
+                ctx.fillText(run, runStart * charW, y * charH);
             }
-            // рисуем все строки, включая пустые — пробелы важны для фона
-            ctx.fillText(row, 0, y * charH);
         }
     };
 

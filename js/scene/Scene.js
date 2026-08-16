@@ -50,6 +50,19 @@ A3D.modules.Scene = (function () {
         // Future: per-object animation hooks can use dt here.
     };
 
+    // Assigns a stable id to every mesh in the scene (0, 1, 2, ... in traversal
+    // order). The renderer maps each id to a palette entry so that different
+    // objects get different glyphs/colors. Called once per loaded scene.
+    Scene.prototype.assignMeshIds = function () {
+        var id = 0;
+        for (var i = 0; i < this.objects.length; i++) {
+            this.objects[i].traverse(function (node) {
+                if (node.isMesh) node.meshId = id++;
+            });
+        }
+        return id;
+    };
+
     // Total mesh face count (for HUD / performance budgeting).
     Scene.prototype.countFaces = function () {
         var total = 0;

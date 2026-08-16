@@ -345,6 +345,7 @@
             scene.add(orb);
 
             scene.update(0);
+            scene.assignMeshIds();
 
             var fb = new FrameBuffer();
             fb.resize(80, 40);
@@ -380,6 +381,24 @@
             }
             var kinds = Object.keys(distinct).length;
             assertTrue('multiple glyph kinds present (' + kinds + ')', kinds >= 2);
+
+            // per-mesh colors: rendered cells carry the mesh id of whatever
+            // filled them (the ground plane is edge-on/behind from this camera,
+            // so only the orb's cells are visible here)
+            var idSet = {};
+            for (var m = 0; m < fb.ids.length; m++) {
+                if (fb.chars[m] !== ' ') idSet[fb.ids[m]] = true;
+            }
+            assertTrue('rendered cells carry mesh ids (' + Object.keys(idSet).length + ')', Object.keys(idSet).length >= 1);
+
+            var palette = ['#0f0', '#ff0'];
+            var flushOk = true;
+            try {
+                fb.flush(document.createElement('canvas').getContext('2d'), 10, 20, palette);
+            } catch (e) {
+                flushOk = false;
+            }
+            assertTrue('flush with palette does not throw', flushOk);
 
             // the sphere is centered horizontally; with FOV 70 + aspect-2 cells it
             // lands in the lower half of this small buffer, so check a horizontal

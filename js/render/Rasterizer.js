@@ -12,7 +12,7 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
     // Draws one screen-space polygon (2-4 pts with invW) into the frame buffer.
     // Depth = interpolated 1/w (perspective-correct). Writes only where the
     // depth is closer than what's already stored (z-buffer test in setCell).
-    function fillPoly(fb, pts, ch) {
+    function fillPoly(fb, pts, ch, meshId) {
         var n = pts.length;
         if (n < 3) return;
 
@@ -64,7 +64,7 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
                     var xc = px + 0.5;
                     var invW = grad.A * xc + grad.B * yc + grad.C;
                     if (invW > 0) {
-                        fb.setCell(px, py, ch, invW);
+                        fb.setCell(px, py, ch, invW, meshId);
                     }
                 }
             }
@@ -93,12 +93,12 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
     }
 
     // Draws a screen-space line segment with the given glyph, z-tested.
-    function drawLine(fb, p0, p1, ch) {
+    function drawLine(fb, p0, p1, ch, meshId) {
         var dx = p1.x - p0.x;
         var dy = p1.y - p0.y;
         var steps = Math.max(Math.abs(dx), Math.abs(dy));
         if (steps <= 0) {
-            fb.setCell(Math.round(p0.x), Math.round(p0.y), ch, p0.invW);
+            fb.setCell(Math.round(p0.x), Math.round(p0.y), ch, p0.invW, meshId);
             return;
         }
         for (var i = 0; i <= steps; i++) {
@@ -106,7 +106,7 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
             var x = p0.x + dx * t;
             var y = p0.y + dy * t;
             var invW = p0.invW + (p1.invW - p0.invW) * t;
-            fb.setCell(Math.round(x), Math.round(y), ch, invW);
+            fb.setCell(Math.round(x), Math.round(y), ch, invW, meshId);
         }
     }
 
@@ -253,7 +253,7 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
 
                 var proj = Projection.projectFace(tri, normalCam, viewMatrix, projMatrix, width, height, aspect);
                 if (proj) {
-                    fillPoly(fb, proj.pts, polyChar);
+                    fillPoly(fb, proj.pts, polyChar, mesh.meshId || 0);
                 }
             }
         }
@@ -279,7 +279,7 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
             for (var ei = 0; ei < edges.length; ei++) {
                 var seg = Projection.projectEdge(wv[edges[ei][0]], wv[edges[ei][1]], viewMatrix, projMatrix, width, height, aspect);
                 if (seg) {
-                    drawLine(fb, seg[0], seg[1], edgeChar);
+                    drawLine(fb, seg[0], seg[1], edgeChar, m2.meshId || 0);
                 }
             }
         }

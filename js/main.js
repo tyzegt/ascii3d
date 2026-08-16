@@ -121,7 +121,9 @@ A3D.modules.Main = (function () {
             var list = R.listScenes();
             data = list.length > 0 ? R.getScene(list[0]) : { name: 'empty', objects: [] };
         }
-        applyScene(A3D.modules.SceneLoader.load(data));
+        var loaded = A3D.modules.SceneLoader.load(data);
+        if (loaded) loaded.assignMeshIds();
+        applyScene(loaded);
     }
 
     // One-shot hotkeys: menu, camera reset, HUD, add primitive, save scene.
@@ -167,7 +169,9 @@ A3D.modules.Main = (function () {
             Debug.warn('Main', 'menu pick: unknown scene "' + name + '"');
             return;
         }
-        applyScene(A3D.modules.SceneLoader.load(data));
+        var picked = A3D.modules.SceneLoader.load(data);
+        if (picked) picked.assignMeshIds();
+        applyScene(picked);
     }
 
     function applyScene(newScene) {
@@ -290,7 +294,6 @@ A3D.modules.Main = (function () {
     function render() {
         ctx.fillStyle = '#000';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#0f0';
 
         frameBuffer.clear();
 
@@ -303,7 +306,7 @@ A3D.modules.Main = (function () {
             Rasterizer.render(scene, camera, frameBuffer, viewMatrix, projMatrix, aspect);
         }
 
-        frameBuffer.flush(ctx, charW, charH);
+        frameBuffer.flush(ctx, charW, charH, Config.MESH_PALETTE);
     }
 
     if (document.readyState === 'loading') {

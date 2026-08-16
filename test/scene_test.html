@@ -339,12 +339,56 @@
             assertTrue('head is Sphere', c.children[1] instanceof Sphere);
         }
 
+        function testMeshIds() {
+            section('Scene.assignMeshIds / palette');
+
+            var scene = SceneLoader.load(R.getScene('city_block'));
+            var count = scene.assignMeshIds();
+            assertTrue('assignMeshIds returns mesh count (' + count + ')', count >= 7);
+
+            // every mesh has a unique id in [0, count)
+            var seen = {};
+            var unique = true;
+            scene.objects.forEach(function (root) {
+                root.traverse(function (n) {
+                    if (!n.isMesh) return;
+                    if (seen[n.meshId] !== undefined || n.meshId < 0 || n.meshId >= count) unique = false;
+                    seen[n.meshId] = true;
+                });
+            });
+            assertTrue('mesh ids are unique and in range', unique);
+
+            // non-mesh nodes (groups) have no id
+            var groupClean = true;
+            scene.objects.forEach(function (root) {
+                root.traverse(function (n) {
+                    if (!n.isMesh && n.meshId !== undefined) groupClean = false;
+                });
+            });
+            assertTrue('non-mesh nodes carry no meshId', groupClean);
+
+            // palette: distinct meshes map to distinct colors
+            var palette = A3D.modules.Config.MESH_PALETTE;
+            var colors = {};
+            scene.objects.forEach(function (root) {
+                root.traverse(function (n) {
+                    if (n.isMesh) colors[n.meshId % palette.length] = true;
+                });
+            });
+            assertTrue('palette covers all meshes (' + Object.keys(colors).length + ' colors)', Object.keys(colors).length >= 5);
+
+            // reassign after adding a mesh: new mesh gets the next id
+            scene.add(new Cube({ name: 'extra' }));
+            assertTrue('reassign after add grows by 1', scene.assignMeshIds() === count + 1);
+        }
+
         testObject3D();
         testNormals();
         testRegistry();
         testLoader();
         testRoundTrip();
         testCharacter();
+        testMeshIds();
 
         var summary = document.createElement('div');
         summary.className = 'summary';
