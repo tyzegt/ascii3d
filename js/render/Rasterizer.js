@@ -12,7 +12,12 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
     // Draws one screen-space polygon (2-4 pts with invW) into the frame buffer.
     // Depth = interpolated 1/w (perspective-correct). Writes only where the
     // depth is closer than what's already stored (z-buffer test in setCell).
-    function fillPoly(fb, pts, ch, meshId) {
+    //
+    // uvs (опц.) — number[], по 2 на вершину (u0,v0, u1,v1, ...). Если заданы,
+    // вычисляются перспективно-корректные градиенты u/w и v/w (вместе с 1/w),
+    // и из них в каждой ячейке восстанавливаются u,v. Пока глиф/цвет не зависят
+    // от UV (этап A — только инфраструктура); текстуры подключатся позже.
+    function fillPoly(fb, pts, ch, meshId, uvs) {
         var n = pts.length;
         if (n < 3) return;
 
@@ -34,6 +39,12 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
 
         // gradient of invW across the polygon: invW = A*x + B*y + C
         var grad = computeInvWGradient(pts);
+
+        // перспективно-корректные UV (этап A — инфраструктура): если переданы
+        // uvs, строим градиенты u/w и v/w. Пока глиф/цвет не зависят от UV;
+        // текстуры (этап C) будут семплировать по восстановленным u,v.
+        var hasUV = !!(uvs && uvs.length >= n * 2);
+        var uvGrads = hasUV ? buildUVGradients(pts, uvs) : null;
 
         for (var py = y0; py <= y1; py++) {
             var yc = py + 0.5;
@@ -64,6 +75,13 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
                     var xc = px + 0.5;
                     var invW = grad.A * xc + grad.B * yc + grad.C;
                     if (invW > 0) {
+                        // перспективно-корректные u,v для ячейки (этап A —
+                        // инфраструктура: пока не влияют на глиф/цвет, но
+                        // восстанавливаются, чтобы текстуры этапа C могли их
+                        // использовать; также покрывается unit-тестами).
+                        if (uvGrads) {
+                            sampleUV(uvGrads, grad, xc, yc);
+                        }
                         fb.setCell(px, py, ch, invW, meshId);
                     }
                 }
@@ -71,11 +89,38 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
         }
     }
 
-    // Fits invW = A*x + B*y + C to the polygon's first three vertices.
-    function computeInvWGradient(pts) {
-        var x0 = pts[0].x, y0 = pts[0].y, w0 = pts[0].invW;
-        var x1 = pts[1].x, y1 = pts[1].y, w1 = pts[1].invW;
-        var x2 = pts[2].x, y2 = pts[2].y, w2 = pts[2].invW;
+    // Строит перспективно-корректные градиенты u/w и v/w для полигона.
+    // Возвращает { uw: grad, vw: grad }, где каждый grad = {A,B,C} — линейная
+    // функция по экранным координатам (x,y). В ячейке восстанавливается через
+    // sampleUV: u = (u/w)/(1/w), v = (v/w)/(1/w) — корректно для плоской грани.
+    function buildUVGradients(pts, uvs) {
+        var n = pts.length;
+        var uwPts = new Array(n), vwPts = new Array(n);
+        for (var i = 0; i < n; i++) {
+            var uVal = uvs[i * 2], vVal = uvs[i * 2 + 1];
+            var iW = pts[i].invW || 0;
+            uwPts[i] = { x: pts[i].x, y: pts[i].y, val: uVal * iW };
+            vwPts[i] = { x: pts[i].x, y: pts[i].y, val: vVal * iW };
+        }
+        return { uw: solveGradient3(uwPts), vw: solveGradient3(vwPts) };
+    }
+
+    // Восстанавливает u,v в точке (xc,yc) экрана по градиентам 1/w, u/w, v/w.
+    // Возвращает {u, v} или null, если invW <= 0 (точка за near plane).
+    function sampleUV(uvGrads, invWGrad, xc, yc) {
+        if (!uvGrads) return null;
+        var invW = invWGrad.A * xc + invWGrad.B * yc + invWGrad.C;
+        if (invW <= 0) return null;
+        var uw = uvGrads.uw.A * xc + uvGrads.uw.B * yc + uvGrads.uw.C;
+        var vw = uvGrads.vw.A * xc + uvGrads.vw.B * yc + uvGrads.vw.C;
+        return { u: uw / invW, v: vw / invW };
+    }
+
+    // Fits val = A*x + B*y + C to the first three points of pts (each with .x,.y,.val).
+    function solveGradient3(pts) {
+        var x0 = pts[0].x, y0 = pts[0].y, w0 = pts[0].val;
+        var x1 = pts[1].x, y1 = pts[1].y, w1 = pts[1].val;
+        var x2 = pts[2].x, y2 = pts[2].y, w2 = pts[2].val;
 
         // solve:
         //   A*x0 + B*y0 + C = w0
@@ -83,13 +128,22 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
         //   A*x2 + B*y2 + C = w2
         var d = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0);
         if (Math.abs(d) < 1e-9) {
-            // degenerate (collinear / off-screen sliver): constant depth
+            // degenerate (collinear / off-screen sliver): constant value
             return { A: 0, B: 0, C: w0 };
         }
         var A = ((w1 - w0) * (y2 - y0) - (w2 - w0) * (y1 - y0)) / d;
         var B = ((x1 - x0) * (w2 - w0) - (x2 - x0) * (w1 - w0)) / d;
         var C = w0 - A * x0 - B * y0;
         return { A: A, B: B, C: C };
+    }
+
+    // Fits invW = A*x + B*y + C to the polygon's first three vertices.
+    function computeInvWGradient(pts) {
+        var tmp = new Array(3);
+        for (var i = 0; i < 3; i++) {
+            tmp[i] = { x: pts[i].x, y: pts[i].y, val: pts[i].invW };
+        }
+        return solveGradient3(tmp);
     }
 
     // Draws a screen-space line segment with the given glyph, z-tested.
@@ -300,7 +354,10 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
                 // face normal in camera space (for back-face cull)
                 var normalCam = Projection.normalToCamera(f.normal, viewMatrix);
 
-                var proj = Projection.projectFace(tri, normalCam, viewMatrix, projMatrix, width, height, aspect);
+                // uvs: пока null (этап A — примитивы ещё не генерируют faces[i].uv;
+                // этап C добавит UV и передаст их сюда).
+                var faceUVs = (f && f.uv) ? f.uv : null;
+                var proj = Projection.projectFace(tri, faceUVs, normalCam, viewMatrix, projMatrix, width, height, aspect);
                 if (proj) {
                     fillPoly(fb, proj.pts, polyChar, mesh.meshId || 0);
                 }
@@ -339,6 +396,8 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
         fillPoly: fillPoly,
         drawLine: drawLine,
         computeInvWGradient: computeInvWGradient,
+        buildUVGradients: buildUVGradients,
+        sampleUV: sampleUV,
         boxInFrustum: boxInFrustum,
         getBoundingBox: getBoundingBox
     };

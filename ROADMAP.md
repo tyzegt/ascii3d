@@ -139,7 +139,13 @@ test.html 34, scene_test.html 48, render_test.html 33 — все зелёные)
 
 ## Этап 7 — Освещение, прозрачность, расширения ⏳
 **Цель:** визуальные фичи поверх готового MVP (см. `PLAN.md`, раздел 7).
+Детальный пофайловый план — в `FEATURES_PLAN.md` (этапы A–D).
 
+- **Подготовка рендера (Этап A из FEATURES_PLAN) ✅** — per-cell цвет в FrameBuffer
+  (`r/g/b`, `setCellColor`, `flush` по (глиф,цвет)); UV в проекции (`CVertex.u/v`,
+  `clipNear`/`lerpVerts` интерполируют, `projectFace(verts, uvs, ...)`);
+  `Rasterizer.fillPoly` считает градиенты `u/w`,`v/w`. Без визуальных изменений —
+  инфраструктура под свет и текстуры. Проверено: render_test.html 78 assert ✓.
 - **Освещение** — подключить `utils/Colors.js` к рендеру: Rasterizer выбирает символ
   полигона из `GlyphMap.RAMP` по интенсивности грани (`normal · lightDir` + ambient)
   вместо константного `#`. Направленный свет; точки/омни — опционально.

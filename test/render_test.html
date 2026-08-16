@@ -179,6 +179,33 @@
             } else {
                 assertTrue('clip interpolation exact (x=2.5 at z=-near)', false, 'no result');
             }
+
+            // UV preservation through clip: vertices carry u/v; the interpolated
+            // clip vertex must have u/v linearly blended in camera space.
+            var uvTri = [
+                { x: 0, y: 0, z: -2, u: 0, v: 0 },
+                { x: 10, y: 0, z: 2, u: 1, v: 0.5 },   // behind -> clipped
+                { x: 5, y: 5, z: -10, u: 0.5, v: 1 }
+            ];
+            var rUV = Projection.clipNear(uvTri, near);
+            assertTrue('clipNear keeps vert count with UV (4 verts)', rUV && rUV.length === 4, 'got ' + (rUV && rUV.length));
+            if (rUV) {
+                // the interpolated vertex sits at z=-near; its u/v must equal the
+                // linear blend of the two edge endpoints at t=0.25 (same as x test).
+                var clipVert = null;
+                for (var uvI = 0; uvI < rUV.length; uvI++) {
+                    if (Math.abs(rUV[uvI].z - (-near)) < 1e-6) {
+                        // only the interpolated one has z exactly at -near AND x=2.5
+                        if (Math.abs(rUV[uvI].x - 2.5) < 1e-6) clipVert = rUV[uvI];
+                    }
+                }
+                assertTrue('clipped vertex exists with exact z', !!clipVert);
+                if (clipVert) {
+                    // u: lerp(0 -> 1, t=0.25) = 0.25 ; v: lerp(0 -> 0.5, t=0.25) = 0.125
+                    assertClose('clipped vertex u interpolated', clipVert.u, 0.25, 1e-4);
+                    assertClose('clipped vertex v interpolated', clipVert.v, 0.125, 1e-4);
+                }
+            }
         }
 
         // ---------- projectFace ----------
@@ -197,7 +224,7 @@
             var normalWorld = new Vec3(0, 0, 1);
             var normalCam = Projection.normalToCamera(normalWorld, view);
 
-            var r = Projection.projectFace(tri, normalCam, view, proj, W, H, aspect);
+            var r = Projection.projectFace(tri, null, normalCam, view, proj, W, H, aspect);
             assertTrue('front-facing face projects', !!r);
             if (r) {
                 assertTrue('projected 3 points', r.pts.length === 3);
@@ -212,14 +239,14 @@
                 assertTrue('all invW > 0', okW);
 
                 // back-face cull: same triangle but normal flipped -> culled
-                var rBack = Projection.projectFace(tri, new Vec3(-normalCam.x, -normalCam.y, -normalCam.z), view, proj, W, H, aspect);
+                var rBack = Projection.projectFace(tri, null, new Vec3(-normalCam.x, -normalCam.y, -normalCam.z), view, proj, W, H, aspect);
                 assertTrue('back-facing face culled', rBack === null);
             }
 
             // Face behind the camera -> clipped to null
             var behind = [new Vec3(-1, -1, 8), new Vec3(1, -1, 8), new Vec3(0, 1, 8)];
             var nBehind = Projection.normalToCamera(new Vec3(0, 0, 1), view);
-            var rBehind = Projection.projectFace(behind, nBehind, view, proj, W, H, aspect);
+            var rBehind = Projection.projectFace(behind, null, nBehind, view, proj, W, H, aspect);
             assertTrue('face behind camera -> null', rBehind === null);
 
             // Normal transform: camera at (0,0,5) looking to origin has identity
@@ -228,6 +255,32 @@
             assertClose('normalToCamera x', normalCam.x, 0, 1e-5);
             assertClose('normalToCamera y', normalCam.y, 0, 1e-5);
             assertClose('normalToCamera z', normalCam.z, 1, 1e-5);
+
+            // projectFace with uvs: each output pt must carry the face-corner UV.
+            var triUV = [new Vec3(-1, -1, 0), new Vec3(1, -1, 0), new Vec3(0, 1, 0)];
+            var uvArr = [0, 0,   1, 0,   0.5, 1];  // per-corner (u,v)
+            var rUVFace = Projection.projectFace(triUV, uvArr, normalCam, view, proj, W, H, aspect);
+            assertTrue('projectFace with uvs projects', !!rUVFace);
+            if (rUVFace && rUVFace.pts.length === 3) {
+                // no clipping here (all z=0 in front), so pt.u/v == input uv order
+                assertClose('pt[0].u', rUVFace.pts[0].u, 0, 1e-5);
+                assertClose('pt[0].v', rUVFace.pts[0].v, 0, 1e-5);
+                assertClose('pt[1].u', rUVFace.pts[1].u, 1, 1e-5);
+                assertClose('pt[1].v', rUVFace.pts[1].v, 0, 1e-5);
+                assertClose('pt[2].u', rUVFace.pts[2].u, 0.5, 1e-5);
+                assertClose('pt[2].v', rUVFace.pts[2].v, 1, 1e-5);
+            } else {
+                assertTrue('projectFace with uvs: 3 pts', false, 'got ' + (rUVFace && rUVFace.pts.length));
+            }
+
+            // projectFace WITHOUT uvs: pts still have u/v fields (default 0) —
+            // backward compatible, existing callers unaffected.
+            var rNoUV = Projection.projectFace(tri, null, normalCam, view, proj, W, H, aspect);
+            assertTrue('projectFace without uvs still works', !!rNoUV && rNoUV.pts.length === 3);
+            if (rNoUV) {
+                assertClose('pt.u defaults to 0 (no uvs)', rNoUV.pts[0].u, 0, 1e-9);
+                assertClose('pt.v defaults to 0 (no uvs)', rNoUV.pts[0].v, 0, 1e-9);
+            }
         }
 
         // ---------- projectEdge ----------
@@ -300,6 +353,113 @@
             // perspective-correct interpolation: invW should be lower at the far edge
             var grad = Rasterizer.computeInvWGradient(pts);
             assertTrue('invW gradient computed', isFinite(grad.A) && isFinite(grad.B) && isFinite(grad.C));
+
+            // ---------- per-cell color (setCellColor / flush) ----------
+            var fbC = new FrameBuffer();
+            fbC.resize(20, 10);
+            fbC.clear();
+            // write a colored cell; z-test should accept it (depth > 0)
+            fbC.setCellColor(5, 5, '#', 0.5, 0, 1, 0, 0);   // red
+            assertTrue('setCellColor writes glyph', fbC.getChar(5, 5) === '#');
+            assertClose('setCellColor stores r=255', fbC.r[5 * 20 + 5], 255, 0.5);
+            assertClose('setCellColor stores g=0', fbC.g[5 * 20 + 5], 0, 0.5);
+            assertClose('setCellColor stores b=0', fbC.b[5 * 20 + 5], 0, 0.5);
+            // a farther (smaller invW) write must NOT overwrite the color
+            fbC.setCellColor(5, 5, '@', 0.1, 0, 0, 1, 1);   // cyan, but rejected
+            assertTrue('farther setCellColor rejected by z-buffer', fbC.getChar(5, 5) === '#');
+            assertClose('rejected write did not change r', fbC.r[5 * 20 + 5], 255, 0.5);
+            // a closer (larger invW) write wins and updates color
+            fbC.setCellColor(5, 5, '@', 0.9, 0, 0, 1, 0);   // green, wins
+            assertTrue('closer setCellColor wins', fbC.getChar(5, 5) === '@');
+            assertClose('winning write r=0', fbC.r[5 * 20 + 5], 0, 0.5);
+            assertClose('winning write g=255', fbC.g[5 * 20 + 5], 255, 0.5);
+
+            // clear() resets color back to neutral white
+            fbC.clear();
+            assertTrue('clear resets glyph', fbC.getChar(5, 5) === ' ');
+            assertClose('clear resets r to 255', fbC.r[5 * 20 + 5], 255, 0.5);
+
+            // flush with per-cell color groups runs by (glyph,color): a row with
+            // two different colors must produce two separate fillText calls with
+            // distinct fillStyle values. We spy on ctx to capture fillStyle.
+            var fbF = new FrameBuffer();
+            fbF.resize(10, 1);
+            fbF.clear();
+            fbF.setCellColor(0, 0, 'a', 1, 0, 1, 0, 0);   // red
+            fbF.setCellColor(1, 0, 'a', 1, 0, 0, 1, 0);   // green (same glyph, diff color)
+            var styles = [];
+            var spyCtx = {
+                font: '', textBaseline: '', fillStyle: '',
+                fillText: function (txt, x, y) { styles.push(this.fillStyle + '|' + txt); }
+            };
+            fbF.flush(spyCtx, 10, 20, null);
+            // expect two runs: red 'a' then green 'a'
+            assertTrue('flush splits by color (2 runs)', styles.length === 2, 'got ' + JSON.stringify(styles));
+            if (styles.length === 2) {
+                assertTrue('first run is red', /rgb\(255,0,0\)/.test(styles[0]), styles[0]);
+                assertTrue('second run is green', /rgb\(0,255,0\)/.test(styles[1]), styles[1]);
+            }
+
+            // flush with same color + same glyph merges into one run
+            var fbF2 = new FrameBuffer();
+            fbF2.resize(10, 1);
+            fbF2.clear();
+            fbF2.setCellColor(0, 0, 'a', 1, 0, 1, 0, 0);
+            fbF2.setCellColor(1, 0, 'a', 1, 0, 1, 0, 0);   // same red
+            var styles2 = [];
+            var spyCtx2 = {
+                font: '', textBaseline: '', fillStyle: '',
+                fillText: function (txt) { styles2.push(this.fillStyle + '|' + txt); }
+            };
+            fbF2.flush(spyCtx2, 10, 20, null);
+            assertTrue('flush merges same (glyph,color) into 1 run', styles2.length === 1, 'got ' + JSON.stringify(styles2));
+
+            // ---------- perspective-correct UV gradients (u/w, v/w) ----------
+            // A triangle in screen space with varying invW and per-corner UVs.
+            var uvPts = [
+                { x: 10, y: 5,  invW: 0.2, u: 0,   v: 0 },
+                { x: 30, y: 5,  invW: 0.4, u: 1,   v: 0 },
+                { x: 20, y: 15, invW: 0.6, u: 0.5, v: 1 }
+            ];
+            var uvArr2 = [0, 0,   1, 0,   0.5, 1];
+            var grads = Rasterizer.buildUVGradients(uvPts, uvArr2);
+            assertTrue('buildUVGradients returns uw & vw', !!grads && !!grads.uw && !!grads.vw);
+            if (grads) {
+                // at each vertex, sampleUV must recover the exact corner u/v.
+                var invWGrad = Rasterizer.computeInvWGradient(uvPts);
+                for (var vi2 = 0; vi2 < 3; vi2++) {
+                    var p = uvPts[vi2];
+                    var sampled = Rasterizer.sampleUV(grads, invWGrad, p.x, p.y);
+                    assertTrue('sampleUV at vertex ' + vi2 + ' not null', !!sampled);
+                    if (sampled) {
+                        assertClose('sampleUV u at vertex ' + vi2, sampled.u, uvArr2[vi2 * 2], 1e-3);
+                        assertClose('sampleUV v at vertex ' + vi2, sampled.v, uvArr2[vi2 * 2 + 1], 1e-3);
+                    }
+                }
+                // perspective check: the barycentric center of the triangle should
+                // give a u/v that is NOT the naive screen-space average — i.e. the
+                // 1/w weighting matters. We just assert it's finite and in [0,1].
+                var cxp = (uvPts[0].x + uvPts[1].x + uvPts[2].x) / 3;
+                var cyp = (uvPts[0].y + uvPts[1].y + uvPts[2].y) / 3;
+                var centerUV = Rasterizer.sampleUV(grads, invWGrad, cxp, cyp);
+                assertTrue('sampleUV at centroid finite', !!centerUV && isFinite(centerUV.u) && isFinite(centerUV.v));
+                if (centerUV) {
+                    assertTrue('centroid u in [0,1]', centerUV.u >= -1e-3 && centerUV.u <= 1 + 1e-3, 'u=' + centerUV.u);
+                    assertTrue('centroid v in [0,1]', centerUV.v >= -1e-3 && centerUV.v <= 1 + 1e-3, 'v=' + centerUV.v);
+                }
+            }
+
+            // fillPoly with uvs must not change the rasterized glyph/depth (stage A:
+            // no visual regression) — same output as without uvs.
+            var fbA = new FrameBuffer(); fbA.resize(40, 20); fbA.clear();
+            var fbB = new FrameBuffer(); fbB.resize(40, 20); fbB.clear();
+            Rasterizer.fillPoly(fbA, uvPts, '#');
+            Rasterizer.fillPoly(fbB, uvPts, '#', 0, uvArr2);
+            var sameOut = true;
+            for (var ci = 0; ci < fbA.chars.length; ci++) {
+                if (fbA.chars[ci] !== fbB.chars[ci]) { sameOut = false; break; }
+            }
+            assertTrue('fillPoly with uvs: identical glyph output (no regression)', sameOut);
         }
 
         // ---------- drawLine ----------

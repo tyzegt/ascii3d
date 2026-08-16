@@ -7,11 +7,16 @@ var Projection = (A3D.modules.Projection = (function () {
     var Vec3 = A3D.modules.Vec3;
 
     // Camera-space vertex: x, y, z (camera space) + w (= -z_cam for perspective).
-    function CVertex(x, y, z) {
+    // u/v — UV-координаты угла грани (опц., для текстур); интерполируются
+    // линейно в camera-space при near-clip (корректно: UV линейны по плоской
+    // грани в 3D).
+    function CVertex(x, y, z, u, v) {
         this.x = x;
         this.y = y;
         this.z = z;
         this.w = -z;
+        this.u = (u === undefined) ? 0 : u;
+        this.v = (v === undefined) ? 0 : v;
     }
 
     // Small safety margin so vertices exactly at z=0 never divide by zero.
@@ -25,7 +30,9 @@ var Projection = (A3D.modules.Projection = (function () {
         return new CVertex(
             a.x + (b.x - a.x) * t,
             a.y + (b.y - a.y) * t,
-            a.z + (b.z - a.z) * t
+            a.z + (b.z - a.z) * t,
+            a.u + (b.u - a.u) * t,
+            a.v + (b.v - a.v) * t
         );
     }
 
@@ -67,24 +74,30 @@ var Projection = (A3D.modules.Projection = (function () {
     // Projects a face into screen space.
     // Inputs:
     //   verts       - Vec3[] in WORLD space
+    //   uvs         - (опц.) number[], по 2 на вершину (u0,v0, u1,v1, ...) —
+    //                  UV-координаты углов грани; кладутся в CVertex и
+    //                  интерполируются при near-clip.
     //   normalCam   - Vec3, face normal transformed to CAMERA space (for cull)
     //   viewMatrix  - camera view matrix
     //   projMatrix  - perspective matrix
     //   width/height- frame buffer size in ascii cells
     //   aspect      - cellH / cellW (taller-than-wide correction for sy)
-    // Output: { pts: [{x, y, invW}], area } or null when culled/clipped away.
-    function projectFace(verts, normalCam, viewMatrix, projMatrix, width, height, aspect) {
+    // Output: { pts: [{x, y, invW, u, v}], area } or null when culled/clipped away.
+    function projectFace(verts, uvs, normalCam, viewMatrix, projMatrix, width, height, aspect) {
         var n = verts.length;
         var p = viewMatrix.elements;
         var cam = new Array(n);
 
-        // world -> camera space
+        // world -> camera space (+ UV угла грани, если переданы)
         for (var i = 0; i < n; i++) {
             var v = verts[i];
+            var u = (uvs && uvs.length >= n * 2) ? uvs[i * 2] : 0;
+            var vv = (uvs && uvs.length >= n * 2) ? uvs[i * 2 + 1] : 0;
             cam[i] = new CVertex(
                 p[0] * v.x + p[4] * v.y + p[8] * v.z + p[12],
                 p[1] * v.x + p[5] * v.y + p[9] * v.z + p[13],
-                p[2] * v.x + p[6] * v.y + p[10] * v.z + p[14]
+                p[2] * v.x + p[6] * v.y + p[10] * v.z + p[14],
+                u, vv
             );
         }
 
@@ -122,7 +135,9 @@ var Projection = (A3D.modules.Projection = (function () {
             pts[k] = {
                 x: (ndcX * 0.5 + 0.5) * width,
                 y: (0.5 - ndcY * 0.5) * height * aspect,
-                invW: invW
+                invW: invW,
+                u: c.u,
+                v: c.v
             };
         }
 
