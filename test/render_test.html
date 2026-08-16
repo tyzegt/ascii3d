@@ -44,6 +44,7 @@
             '../js/scene/Scene.js',
             '../js/scene/SceneLoader.js',
             '../js/render/GlyphMap.js',
+            '../js/render/Lighting.js',
             '../js/render/Projection.js',
             '../js/render/Rasterizer.js',
             '../js/render/FrameBuffer.js'
@@ -64,6 +65,8 @@
         var FrameBuffer = A3D.modules.FrameBuffer;
         var Projection = A3D.modules.Projection;
         var Rasterizer = A3D.modules.Rasterizer;
+        var Lighting = A3D.modules.Lighting;
+        var Config = A3D.modules.Config;
 
         var output = document.getElementById('output');
         var passed = 0;
@@ -524,14 +527,25 @@
             }
             assertTrue('scene produced visible cells (' + filled + ')', filled > 50, 'too few: ' + filled);
 
-            // the image should have both polygon chars and edge chars
-            var hasPoly = false, hasEdge = false;
+            // the image should have edge chars (outlines, GlyphMap.edge)
+            var hasEdge = false;
             for (var j = 0; j < fb.chars.length; j++) {
-                if (fb.chars[j] === '#') hasPoly = true;
                 if (fb.chars[j] === '@') hasEdge = true;
             }
-            assertTrue('polygon glyph present', hasPoly);
             assertTrue('edge glyph present', hasEdge);
+
+            // без источников света глиф полигона = byIntensity(AMBIENT) = '.' —
+            // градиент символов по освещению (этап B). Проверяем, что заполненные
+            // ячейки используют glyphs из RAMP, а не только константу '#'.
+            var hasRampPoly = false;
+            for (var j2 = 0; j2 < fb.chars.length; j2++) {
+                var ch2 = fb.chars[j2];
+                if (ch2 !== ' ' && ch2 !== '@' && A3D.modules.GlyphMap.RAMP.indexOf(ch2) !== -1) {
+                    hasRampPoly = true;
+                    break;
+                }
+            }
+            assertTrue('polygon glyphs come from RAMP (lighting)', hasRampPoly);
 
             // sphere is in front of ground -> the buffer must contain more than
             // one glyph kind (depth / occlusion actually did something).
@@ -571,11 +585,105 @@
             assertTrue('something rendered in the center column (lower half)', hasCenterBand);
         }
 
+        // ---------- Lighting (этап B) ----------
+        function testLighting() {
+            section('Lighting');
+
+            // normalizeLight: valid point light
+            var pl = Lighting.normalizeLight({ type: 'point', color: [1, 0.5, 0], intensity: 2, position: [3, 4, 5] });
+            assertTrue('normalizeLight point ok', !!pl && pl.type === 'point');
+            if (pl) {
+                assertClose('point intensity kept', pl.intensity, 2);
+                assertTrue('point position is Vec3', pl.position instanceof Vec3);
+                assertClose('point position x', pl.position.x, 3);
+                assertClose('point color[1]', pl.color[1], 0.5);
+            }
+
+            // normalizeLight: valid directional light (direction normalized)
+            var dl = Lighting.normalizeLight({ type: 'directional', color: [0.2, 0.4, 0.6], intensity: 0.8, direction: [0, -10, 0] });
+            assertTrue('normalizeLight directional ok', !!dl && dl.type === 'directional');
+            if (dl) {
+                assertClose('direction normalized y', dl.direction.y, -1);
+                assertClose('direction normalized x', dl.direction.x, 0);
+            }
+
+            // normalizeLight: bad inputs -> null
+            assertTrue('bad type -> null', Lighting.normalizeLight({ type: 'spot' }) === null);
+            assertTrue('missing color -> null', Lighting.normalizeLight({ type: 'point', position: [1, 2, 3] }) === null);
+            assertTrue('point w/o position -> null', Lighting.normalizeLight({ type: 'point', color: [1, 1, 1] }) === null);
+            assertTrue('directional w/o direction -> null', Lighting.normalizeLight({ type: 'directional', color: [1, 1, 1] }) === null);
+            assertTrue('garbage -> null', Lighting.normalizeLight(null) === null);
+
+            // computeFaceLight: no lights -> ambient only (0.1 white)
+            var n = new Vec3(0, 1, 0);
+            var p = new Vec3(0, 0, 0);
+            var amb = Lighting.computeFaceLight(n, p, []);
+            assertClose('no lights r = ambient', amb.r, Config.AMBIENT, 1e-5);
+            assertClose('no lights g = ambient', amb.g, Config.AMBIENT, 1e-5);
+            assertClose('no lights b = ambient', amb.b, Config.AMBIENT, 1e-5);
+
+            // directional: top face (normal +y) lit by light shining straight down
+            var sunDown = [Lighting.normalizeLight({ type: 'directional', color: [1, 1, 1], intensity: 1, direction: [0, -1, 0] })];
+            var topLit = Lighting.computeFaceLight(new Vec3(0, 1, 0), p, sunDown);
+            assertTrue('top face fully lit (r=1)', Math.abs(topLit.r - 1) < 1e-5, 'got ' + topLit.r);
+            // bottom face (normal -y) points away -> ambient only
+            var botUnlit = Lighting.computeFaceLight(new Vec3(0, -1, 0), p, sunDown);
+            assertClose('bottom face ambient only', botUnlit.r, Config.AMBIENT, 1e-5);
+
+            // directional: 45-degree face -> Lambert ~0.707 (unsaturated model:
+            // ambient + dot(normal, toLight), clamp 0..1 — см. FEATURES_PLAN §1.1)
+            var diag = Lighting.computeFaceLight(new Vec3(Math.SQRT1_2, Math.SQRT1_2, 0), p, sunDown);
+            assertClose('45deg face Lambert (ambient + 0.707)',
+                diag.r, Config.AMBIENT + Math.SQRT1_2, 1e-4);
+
+            // colored light: contribution is scaled by light color
+            var redLight = [Lighting.normalizeLight({ type: 'directional', color: [1, 0, 0], intensity: 1, direction: [0, -1, 0] })];
+            var redTop = Lighting.computeFaceLight(new Vec3(0, 1, 0), p, redLight);
+            assertClose('red light r ~1', redTop.r, 1, 1e-5);
+            assertClose('red light g = ambient', redTop.g, Config.AMBIENT, 1e-5);
+
+            // point light: directly below the light, normal up -> full contribution
+            var plight = [Lighting.normalizeLight({ type: 'point', color: [1, 1, 1], intensity: 1, position: [0, 3, 0] })];
+            var underPoint = Lighting.computeFaceLight(new Vec3(0, 1, 0), new Vec3(0, 0, 0), plight);
+            var expAtt = 1 / (1 + Config.POINT_ATTENUATION_K * 9); // d=3
+            assertClose('point directly above: ambient + att(3)', underPoint.r, Config.AMBIENT + expAtt, 1e-4);
+
+            // attenuation grows with distance: face at d=6 is darker than at d=3
+            var farPoint = Lighting.computeFaceLight(new Vec3(0, 1, 0), new Vec3(0, -3, 0), plight);
+            assertTrue('point attenuates with distance', farPoint.r < underPoint.r,
+                'far=' + farPoint.r + ' near=' + underPoint.r);
+
+            // point light behind the face (normal away) -> ambient only
+            var behind = Lighting.computeFaceLight(new Vec3(0, 1, 0), new Vec3(0, 3, 0), plight);
+            assertClose('point behind face: ambient only', behind.r, Config.AMBIENT, 1e-5);
+
+            // two lights add up (clamped to 1)
+            var both = Lighting.computeFaceLight(new Vec3(0, 1, 0), p, sunDown.concat(plight));
+            assertTrue('two lights brighter than one', both.r > topLit.r - 1e-6 && both.r <= 1 + 1e-6, 'got ' + both.r);
+
+            // luminance: white -> 1, black -> 0, red -> ~0.3
+            assertClose('luminance(white) = 1', Lighting.luminance({ r: 1, g: 1, b: 1 }), 1, 1e-5);
+            assertClose('luminance(black) = 0', Lighting.luminance({ r: 0, g: 0, b: 0 }), 0, 1e-5);
+            assertClose('luminance(red) ~ 0.3', Lighting.luminance({ r: 1, g: 0, b: 0 }), 0.3, 1e-5);
+
+            // ambient=0.1 gives a dark but visible glyph (RAMP index 1 = '.')
+            var GlyphMap = A3D.modules.GlyphMap;
+            assertClose('ambient luminance ~0.1', Lighting.luminance(amb), Config.AMBIENT, 1e-5);
+            assertTrue('ambient-only glyph is dim but not empty',
+                GlyphMap.byIntensity(Lighting.luminance(amb)) !== GlyphMap.RAMP[0],
+                'got ' + JSON.stringify(GlyphMap.byIntensity(Lighting.luminance(amb))));
+
+            // attenuation() helper: monotone decreasing, =1 at d=0
+            assertTrue('attenuation(0) = 1', Math.abs(Lighting.attenuation(0) - 1) < 1e-6);
+            assertTrue('attenuation decreases', Lighting.attenuation(5) < Lighting.attenuation(1));
+        }
+
         testClipNear();
         testProjectFace();
         testProjectEdge();
         testRasterizer();
         testDrawLine();
+        testLighting();
         testSceneRender();
 
         var summary = document.createElement('div');

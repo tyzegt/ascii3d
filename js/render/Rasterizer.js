@@ -8,6 +8,17 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
     var Projection = A3D.modules.Projection;
     var GlyphMap = A3D.modules.GlyphMap;
     var Config = A3D.modules.Config;
+    var Lighting = A3D.modules.Lighting;
+
+    // 'r,g,b' (0..1, допустимо >1) → [R,G,B] 0..255.
+    function rgbTo255(c) {
+        if (!c || c.length < 3) return [255, 255, 255];
+        function q(v) {
+            v = Math.round(v * 255);
+            return v < 0 ? 0 : (v > 255 ? 255 : v);
+        }
+        return [q(c[0]), q(c[1]), q(c[2])];
+    }
 
     // Draws one screen-space polygon (2-4 pts with invW) into the frame buffer.
     // Depth = interpolated 1/w (perspective-correct). Writes only where the
@@ -17,7 +28,10 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
     // вычисляются перспективно-корректные градиенты u/w и v/w (вместе с 1/w),
     // и из них в каждой ячейке восстанавливаются u,v. Пока глиф/цвет не зависят
     // от UV (этап A — только инфраструктура); текстуры подключатся позже.
-    function fillPoly(fb, pts, ch, meshId, uvs) {
+    //
+    // color (опц.) — [r,g,b] 0..1: записывается per-cell через setCellColor
+    // (освещение, этап B). Без color — setCell (старое поведение, белый цвет).
+    function fillPoly(fb, pts, ch, meshId, uvs, color) {
         var n = pts.length;
         if (n < 3) return;
 
@@ -82,7 +96,11 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
                         if (uvGrads) {
                             sampleUV(uvGrads, grad, xc, yc);
                         }
-                        fb.setCell(px, py, ch, invW, meshId);
+                        if (color) {
+                            fb.setCellColor(px, py, ch, invW, meshId, color[0], color[1], color[2]);
+                        } else {
+                            fb.setCell(px, py, ch, invW, meshId);
+                        }
                     }
                 }
             }
@@ -147,12 +165,17 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
     }
 
     // Draws a screen-space line segment with the given glyph, z-tested.
-    function drawLine(fb, p0, p1, ch, meshId) {
+    // color (опц.) — [r,g,b] 0..1: per-cell цвет через setCellColor.
+    function drawLine(fb, p0, p1, ch, meshId, color) {
         var dx = p1.x - p0.x;
         var dy = p1.y - p0.y;
         var steps = Math.max(Math.abs(dx), Math.abs(dy));
         if (steps <= 0) {
-            fb.setCell(Math.round(p0.x), Math.round(p0.y), ch, p0.invW, meshId);
+            if (color) {
+                fb.setCellColor(Math.round(p0.x), Math.round(p0.y), ch, p0.invW, meshId, color[0], color[1], color[2]);
+            } else {
+                fb.setCell(Math.round(p0.x), Math.round(p0.y), ch, p0.invW, meshId);
+            }
             return;
         }
         for (var i = 0; i <= steps; i++) {
@@ -160,7 +183,11 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
             var x = p0.x + dx * t;
             var y = p0.y + dy * t;
             var invW = p0.invW + (p1.invW - p0.invW) * t;
-            fb.setCell(Math.round(x), Math.round(y), ch, invW, meshId);
+            if (color) {
+                fb.setCellColor(Math.round(x), Math.round(y), ch, invW, meshId, color[0], color[1], color[2]);
+            } else {
+                fb.setCell(Math.round(x), Math.round(y), ch, invW, meshId);
+            }
         }
     }
 
@@ -271,8 +298,37 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
         return poly.length >= 3;
     }
 
+    // Мировая нормаль грани: локальная f.normal × 3×3 из worldMatrix.
+    // Без inverse-transpose — при неоднородном масштабе это приближение
+    // (приемлемо для ascii, см. FEATURES_PLAN §5). Возвращает Vec3 или null.
+    function faceWorldNormal(f, wm) {
+        var n = f.normal;
+        if (!n) return null;
+        var nx = wm[0] * n.x + wm[4] * n.y + wm[8] * n.z;
+        var ny = wm[1] * n.x + wm[5] * n.y + wm[9] * n.z;
+        var nz = wm[2] * n.x + wm[6] * n.y + wm[10] * n.z;
+        var v = new Vec3(nx, ny, nz);
+        if (v.length() < 1e-8) return null;
+        return v.normalize();
+    }
+
+    // Цвет материала меша: mesh.material.color → [r,g,b] 0..1, иначе палитра.
+    function materialColor(mesh) {
+        var mat = mesh && mesh.material;
+        if (mat && Array.isArray(mat.color) && mat.color.length >= 3) {
+            return rgbTo255([mat.color[0], mat.color[1], mat.color[2]]);
+        }
+        var id = (mesh && mesh.meshId !== undefined) ? mesh.meshId : 0;
+        var hex = Config.MESH_PALETTE[((id % Config.MESH_PALETTE.length) + Config.MESH_PALETTE.length) % Config.MESH_PALETTE.length];
+        return [
+            parseInt(hex.substring(1, 3), 16),
+            parseInt(hex.substring(3, 5), 16),
+            parseInt(hex.substring(5, 7), 16)
+        ];
+    }
+
     // Full render: scene -> frame buffer.
-    //   scene      - A3D Scene (objects with world matrices updated)
+    //   scene      - A3D Scene (objects with world matrices updated; scene.lights — источники)
     //   camera     - A3D Camera
     //   fb         - FrameBuffer (already cleared)
     //   viewMatrix, projMatrix - precomputed by the caller
@@ -280,8 +336,10 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
     function render(scene, camera, fb, viewMatrix, projMatrix, aspect) {
         var width = fb.width;
         var height = fb.height;
-        var polyChar = GlyphMap.polygon();
         var edgeChar = GlyphMap.edge();
+        var lights = (scene && scene.lights) ? scene.lights : [];
+        // цвет рёбер: Config.EDGE_COLOR × свет на центроиде меша (этап B)
+        var edgeColor = rgbTo255(Config.EDGE_COLOR || [0.35, 0.35, 0.35]);
 
         // gather meshes (depth sort back-to-front as a cheap heuristic so the
         // ascii z-buffer behaves nicely with sparse cells), frustum-culled
@@ -329,7 +387,9 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
             return nearestW(a) - nearestW(b);
         });
 
-        // pass 1: polygon fill
+        // pass 1: polygon fill (освещение, этап B): мировая нормаль грани +
+        // центроид → Lighting.computeFaceLight; без текстуры глиф =
+        // GlyphMap.byIntensity(luminance), цвет = материал × свет (per-cell).
         for (var i = 0; i < meshes.length; i++) {
             var mesh = meshes[i];
             var wm = mesh.worldMatrix.elements;
@@ -347,9 +407,13 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
                 );
             }
 
+            // цвет материала меша (палитра или mesh.material.color) в 0..1
+            var matRGB = materialColor(mesh);
+
             for (var fi = 0; fi < faces.length; fi++) {
                 var f = faces[fi];
-                var tri = [worldVerts[f.indices[0]], worldVerts[f.indices[1]], worldVerts[f.indices[2]]];
+                var i0 = f.indices[0], i1 = f.indices[1], i2 = f.indices[2];
+                var tri = [worldVerts[i0], worldVerts[i1], worldVerts[i2]];
 
                 // face normal in camera space (for back-face cull)
                 var normalCam = Projection.normalToCamera(f.normal, viewMatrix);
@@ -359,12 +423,28 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
                 var faceUVs = (f && f.uv) ? f.uv : null;
                 var proj = Projection.projectFace(tri, faceUVs, normalCam, viewMatrix, projMatrix, width, height, aspect);
                 if (proj) {
-                    fillPoly(fb, proj.pts, polyChar, mesh.meshId || 0);
+                    // мировая нормаль + центроид грани → свет на грань
+                    var nWorld = faceWorldNormal(f, wm);
+                    var centroid = new Vec3(
+                        (tri[0].x + tri[1].x + tri[2].x) / 3,
+                        (tri[0].y + tri[1].y + tri[2].y) / 3,
+                        (tri[0].z + tri[1].z + tri[2].z) / 3
+                    );
+                    var light = Lighting.computeFaceLight(nWorld || f.normal, centroid, lights);
+                    // без текстуры: глиф по яркости света (градиент символов),
+                    // цвет = материал × свет (per-cell).
+                    var glyph = GlyphMap.byIntensity(Lighting.luminance(light));
+                    fillPoly(fb, proj.pts, glyph, mesh.meshId || 0, null, [
+                        matRGB[0] / 255 * light.r,
+                        matRGB[1] / 255 * light.g,
+                        matRGB[2] / 255 * light.b
+                    ]);
                 }
             }
         }
 
-        // pass 2: edges (outlines) — drawn on top with a stronger glyph
+        // pass 2: edges (outlines) — drawn on top with a stronger glyph;
+        // цвет = Config.EDGE_COLOR × свет на центроиде меша.
         for (var mi = 0; mi < meshes.length; mi++) {
             var m2 = meshes[mi];
             var wm2 = m2.worldMatrix.elements;
@@ -380,12 +460,34 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
                     wm2[2] * vv.x + wm2[6] * vv.y + wm2[10] * vv.z + wm2[14]
                 );
             }
+            var bb = getBoundingBox(m2);
+            var meshCentroid = new Vec3(
+                (bb.minX + bb.maxX) / 2, (bb.minY + bb.maxY) / 2, (bb.minZ + bb.maxZ) / 2
+            );
+            // мировая позиция центроида bbox: local → world
+            var centroidW = new Vec3(
+                wm2[0] * meshCentroid.x + wm2[4] * meshCentroid.y + wm2[8] * meshCentroid.z + wm2[12],
+                wm2[1] * meshCentroid.x + wm2[5] * meshCentroid.y + wm2[9] * meshCentroid.z + wm2[13],
+                wm2[2] * meshCentroid.x + wm2[6] * meshCentroid.y + wm2[10] * meshCentroid.z + wm2[14]
+            );
+            // нормаль для света на центроид: любая грань (ориентация не важна —
+            // берём среднюю мировую нормаль всех граней меша)
+            var avgN = new Vec3(0, 0, 0);
+            for (var fmi = 0; fmi < m2.faces.length; fmi++) {
+                var fn = faceWorldNormal(m2.faces[fmi], wm2);
+                if (fn) avgN = avgN.add(fn);
+            }
+            var edgeLight = Lighting.computeFaceLight(avgN.normalize(), centroidW, lights);
 
             var edges = m2.getEdges();
             for (var ei = 0; ei < edges.length; ei++) {
                 var seg = Projection.projectEdge(wv[edges[ei][0]], wv[edges[ei][1]], viewMatrix, projMatrix, width, height, aspect);
                 if (seg) {
-                    drawLine(fb, seg[0], seg[1], edgeChar, m2.meshId || 0);
+                    drawLine(fb, seg[0], seg[1], edgeChar, m2.meshId || 0, [
+                        edgeColor[0] / 255 * edgeLight.r,
+                        edgeColor[1] / 255 * edgeLight.g,
+                        edgeColor[2] / 255 * edgeLight.b
+                    ]);
                 }
             }
         }

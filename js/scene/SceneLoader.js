@@ -17,9 +17,11 @@ A3D.modules.SceneLoader = (function () {
             return new Scene({});
         }
 
+        // lights парсятся внутри Scene (normalizeLight, битые — с логом).
         var scene = new Scene({
             name: (typeof data.name === 'string') ? data.name : 'scene',
-            camera: (data.camera && typeof data.camera === 'object') ? data.camera : null
+            camera: (data.camera && typeof data.camera === 'object') ? data.camera : null,
+            lights: Array.isArray(data.lights) ? data.lights : []
         });
 
         var list = Array.isArray(data.objects) ? data.objects : [];

@@ -4,7 +4,7 @@
 > Продолжает этап 7 (`ROADMAP.md`) и раздел 7 `PLAN.md`.
 > Все документы проекта — на русском; этот файл продолжает ту же конвенцию.
 >
-> Прогресс: **Этап A ✅** (per-cell цвет + UV в проекции). Следующий — Этап B (освещение).
+> Прогресс: **Этап A ✅** (per-cell цвет + UV в проекции), **Этап B ✅** (освещение). Следующий — Этап C (текстуры).
 
 ---
 
@@ -217,25 +217,28 @@ character_demo рендерятся без артефактов)
 ### Этап B — Освещение
 **Цель:** источники света, цвет/интенсивность, тёмная сцена без света.
 
-- [ ] `Config`: `AMBIENT: 0.1`, дефолты аттенюации.
-- [ ] `Lighting.js`: `normalizeLight`, `computeFaceLight(normal, pos, lights, ambient)`
+- [x] `Config`: `AMBIENT: 0.1`, дефолты аттенюации (`POINT_ATTENUATION_K: 0.08`,
+      `EDGE_COLOR`).
+- [x] `Lighting.js`: `normalizeLight`, `computeFaceLight(normal, pos, lights, ambient)`
       → `{r,g,b}`, `luminance`. `point` (омни, аттенюация по расстоянию) и
       `directional` (параллельный).
-- [ ] `Scene.lights = []` + парсинг в конструкторе; `Scene.toJSON()` сериализует
+- [x] `Scene.lights = []` + парсинг в конструкторе; `Scene.toJSON()` сериализует
       `lights`; `SceneLoader` парсит `data.lights`.
-- [ ] `Rasterizer.render`: мировая нормаль грани (3×3 из `worldMatrix`), позиция
+- [x] `Rasterizer.render`: мировая нормаль грани (3×3 из `worldMatrix`), позиция
       грани (центроид), `computeFaceLight`; без текстуры — глиф по `luminance`,
       цвет = материал; `setCellColor`.
-- [ ] Сцена-пример с одним point-светом и одним directional-светом (проверка градиента
-      и тёмных сторон).
-- [ ] `Colors.js` — тонкая обёртка над `Lighting` (или пометка «устаревший»).
-- [ ] `main.js` `expected` += `Lighting`; `index.html` += скрипт до Rasterizer.
-- [ ] Тесты: `computeFaceLight` для point/directional, аттенюация, ambient=0.1 даёт
+- [x] Сцена-пример с одним point-светом и одним directional-светом (`scenes/light_demo.js`).
+- [x] `Colors.js` — тонкая обёртка над `Lighting` (помечена «устаревший»).
+- [x] `main.js` `expected` += `Lighting`; `index.html` += скрипт до Rasterizer.
+- [x] Тесты: `computeFaceLight` для point/directional, аттенюация, ambient=0.1 даёт
       luminance≈0.1 (тёмная, но не чёрная); round-trip `lights`.
 
 **Приёмка:** без источников сцена затемнена (~90%), но читается; с источниками — на
 гранях градиент глифов (освещённые/теневые стороны), свет имеет цвет и яркость;
-`lights` переживают save/load.
+`lights` переживают save/load. ✅ (проверено через http://ascii3d.local.int/:
+test 34 / scene_test 68 / render_test 110 — все ✓; city_block без света тёмный, но
+читаемый; light_demo — градиент глифов по граням, цветной point-свет + направленный;
+desert/character_demo рендерятся без ошибок консоли)
 
 ### Этап C — Текстуры
 **Цель:** текстуры на примитивах, разные на разных гранях, перспективная коррекция.
