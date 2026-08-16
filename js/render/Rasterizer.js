@@ -129,60 +129,92 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
     }
 
     // Frustum cull: is any part of the mesh's world bounding box on screen?
-    // Tests all 8 corners against the EXACT same screen mapping as
-    // Projection.projectFace (ndc -> [0,width]x[0,height], then y stretched by
-    // cellAspect around the center). A corner inside the window means part of the
-    // object is visible, so we keep it; only cull when every corner is outside.
-    // This is conservative and exact for the trapezoidal perspective window.
+    // Clips the box (a convex polyhedron) against each of the 6 frustum planes
+    // in view space and reports whether anything survives. This is exact for
+    // perspective and handles large flat meshes (e.g. the ground plane) whose
+    // 8 corners can all project off-screen while a band of the surface still
+    // fills the view — testing corners/center alone misses that case.
     function boxInFrustum(mesh, wm, viewMatrix, projMatrix, width, height, cellAspect) {
         var bb = getBoundingBox(mesh);
-        var p = viewMatrix.elements;
         var m = projMatrix.elements;
 
-        // project a local corner to camera space, then to screen cells
-        function camCorner(x, y, z) {
-            // world = wm * local
+        // The 6 frustum planes in VIEW space, as (normal, d) with the inside
+        // half-space being dot(normal, point) + d >= 0. Near/far use the same
+        // NEAR_CLIP as Projection.clipNear so culling never drops a face that
+        // projectFace would keep (and vice-versa). Left/right/top/bottom are
+        // derived from the exact screen mapping used by projectFace:
+        //   sx = (M0*x + M4*y + M8*z) / w in [0, width]
+        //   sy = (-(M1*x + M5*y + M9*z) * cellAspect) / w in [0, height]
+        // with w = -z (> 0 for visible points).
+        var nearZ = Projection.NEAR_CLIP;
+        var farZ = Math.max(1e-4, m[10] + m[14]);
+        var planes = [
+            { a: 0, b: 0, c: -1, d: nearZ },                          // near:  -z >= nearZ
+            { a: 0, b: 0, c: -1, d: -farZ },                          // far:   -z <= farZ
+            { a: m[8] + m[0], b: m[9] + m[4], c: m[10] + m[2], d: m[14] + m[12] },  // left:  (M8+M0)x+(M9+M4)y+(M10+M2)z >= -(M14+M12)
+            { a: m[8] - m[0], b: m[9] - m[4], c: m[10] - m[2], d: -(m[14] + m[12]) },  // right
+            { a: (m[9] + m[5]) * cellAspect, b: (m[10] + m[6]) * cellAspect, c: (m[14] + m[13]) * cellAspect, d: height * cellAspect },  // top
+            { a: -(m[9] - m[5]) * cellAspect, b: -(m[10] - m[6]) * cellAspect, c: -(m[14] - m[13]) * cellAspect, d: height * cellAspect }   // bottom
+        ];
+
+        // Transform the 8 box corners (local -> world -> camera space).
+        var p = viewMatrix.elements;
+        function toCam(x, y, z) {
             var wx = wm[0] * x + wm[4] * y + wm[8] * z + wm[12];
             var wy = wm[1] * x + wm[5] * y + wm[9] * z + wm[13];
             var wz = wm[2] * x + wm[6] * y + wm[10] * z + wm[14];
-            // camera space
-            return {
-                x: p[0] * wx + p[4] * wy + p[8] * wz + p[12],
-                y: p[1] * wx + p[5] * wy + p[9] * wz + p[13],
-                z: p[2] * wx + p[6] * wy + p[10] * wz + p[14]
-            };
+            return [
+                p[0] * wx + p[4] * wy + p[8] * wz + p[12],
+                p[1] * wx + p[5] * wy + p[9] * wz + p[13],
+                p[2] * wx + p[6] * wy + p[10] * wz + p[14]
+            ];
         }
 
-        // Test points: the 8 box corners PLUS the box center. The center matters
-        // for large flat meshes (e.g. the ground): their corners can all project
-        // off-screen / behind while the middle still fills the view.
         var xs = [bb.minX, bb.maxX];
         var ys = [bb.minY, bb.maxY];
         var zs = [bb.minZ, bb.maxZ];
-        var cxs = [(bb.minX + bb.maxX) / 2];
-        var cys = [(bb.minY + bb.maxY) / 2];
-        var czs = [(bb.minZ + bb.maxZ) / 2];
-
-        function testPoint(x, y, z) {
-            var c = camCorner(x, y, z);
-            if (c.z > -Projection.NEAR_CLIP) return false;
-            var w = -c.z;
-            var ndcX = (m[0] * c.x + m[4] * c.y + m[8] * c.z + m[12]) / w;
-            var ndcY = (m[1] * c.x + m[5] * c.y + m[9] * c.z + m[13]) / w;
-            var sx = (ndcX * 0.5 + 0.5) * width;
-            var sy = (0.5 - ndcY * 0.5) * height * cellAspect;
-            return sx >= 0 && sx <= width && sy >= 0 && sy <= height;
-        }
-
+        var poly = [];
         for (var i = 0; i < 2; i++) {
             for (var j = 0; j < 2; j++) {
                 for (var k = 0; k < 2; k++) {
-                    if (testPoint(xs[i], ys[j], zs[k])) return true;
+                    poly.push(toCam(xs[i], ys[j], zs[k]));
                 }
             }
         }
-        // box center (covers large flat geometry whose corners are off-screen)
-        return testPoint(cxs[0], cys[0], czs[0]);
+
+        // Sutherland-Hodgman: clip the polygon against each plane in turn.
+        for (var pl = 0; pl < planes.length && poly.length > 0; pl++) {
+            var nrm = planes[pl];
+            var out = [];
+            var len = poly.length;
+            for (var e = 0; e < len; e++) {
+                var cur = poly[e];
+                var prev = poly[(e + len - 1) % len];
+                var curD = nrm.a * cur[0] + nrm.b * cur[1] + nrm.c * cur[2] + nrm.d;
+                var prevD = nrm.a * prev[0] + nrm.b * prev[1] + nrm.c * prev[2] + nrm.d;
+                if (curD >= 0) {
+                    out.push(cur);
+                    if (prevD < 0) {
+                        var t = prevD / (prevD - curD);
+                        out.push([
+                            prev[0] + (cur[0] - prev[0]) * t,
+                            prev[1] + (cur[1] - prev[1]) * t,
+                            prev[2] + (cur[2] - prev[2]) * t
+                        ]);
+                    }
+                } else if (prevD >= 0) {
+                    var t2 = prevD / (prevD - curD);
+                    out.push([
+                        prev[0] + (cur[0] - prev[0]) * t2,
+                        prev[1] + (cur[1] - prev[1]) * t2,
+                        prev[2] + (cur[2] - prev[2]) * t2
+                    ]);
+                }
+            }
+            poly = out;
+        }
+
+        return poly.length >= 3;
     }
 
     // Full render: scene -> frame buffer.
