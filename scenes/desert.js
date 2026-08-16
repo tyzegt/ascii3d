@@ -4,11 +4,17 @@ window.A3D = window.A3D || {};
 A3D.SceneRegistry.registerScene('desert', {
     name: 'desert',
     camera: { position: [0, 1.8, 7], yaw: 0, pitch: -0.18 },
+    lights: [
+        // Тёплое «солнце» справа-сверху (параллельный свет): градиент по граням.
+        { "type": "directional", "color": [1, 0.95, 0.8], "intensity": 1.1, "direction": [-0.25, -0.7, 0.3] },
+        // Тусклый point-свет (омни) у оазиса: мягкая подсветка в центре.
+        { "type": "point", "color": [0.6, 0.85, 1], "intensity": 0.7, "position": [0, 2, -4] }
+    ],
     objects: [
         // Большой мир: см. city_block — маленький размер даёт «просвечивание» у края.
         { "type": "plane", "name": "sand", "segments": 16, "size": 200 },
         // pyramids of the desert (clustered ahead of the camera)
-        { "type": "pyramid", "name": "pyr_big",   "position": [-5, 0, -8],  "scale": [6, 5, 6] },
+        { "type": "pyramid", "name": "pyr_big",   "position": [-5, 0, -8],  "scale": [6, 5, 6], "texture": "checker" },
         { "type": "pyramid", "name": "pyr_mid",   "position": [5, 0, -10],  "scale": [4.5, 3.8, 4.5] },
         { "type": "pyramid", "name": "pyr_small", "position": [10, 0, -5],  "scale": [2.8, 2.2, 2.8] },
         { "type": "pyramid", "name": "pyr_distant", "position": [-11, 0, -14], "scale": [3.5, 2.6, 3.5] },

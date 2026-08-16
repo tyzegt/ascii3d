@@ -101,9 +101,11 @@ ascii3d/
     │       └── Character.js# example: Group → Cube (body) + Sphere (head)
     ├── render/
     │   ├── Projection.js   # world → camera → near-clip (Sutherland–Hodgman) → ndc → screen
-    │   ├── Rasterizer.js   # scanline, 1/w interpolation, z-buffer, frustum culling, back-to-front sort, edge pass
+    │   ├── Rasterizer.js   # scanline, 1/w interpolation, z-buffer, frustum culling, back-to-front sort, edge pass, lighting + texture sampling
     │   ├── GlyphMap.js     # glyphs by intensity (RAMP), base/edge/empty
-    │   └── FrameBuffer.js  # 2D arrays chars + depth (1/w) + ids (meshId), clear/setCell/flush
+    │   ├── Lighting.js     # point/directional light sources, Lambert + ambient, per-face light → {r,g,b}
+    │   ├── Texture.js      # named ASCII texture registry, sample (bilinear+clamp), per-face-group UV generation
+    │   └── FrameBuffer.js  # 2D arrays chars + depth (1/w) + ids (meshId) + per-cell r/g/b, clear/setCell/setCellColor/flush
     ├── ui/
     │   ├── HUD.js          # overlay: FPS, position, yaw/pitch (in degrees), scene, grid+faces, hints
     │   └── SceneMenu.js    # Tab scene menu + "Load from file…"
@@ -126,9 +128,14 @@ ascii3d/
 4. **Rasterizer** — scanline traversal, `1/w` interpolation (the only correct
    option for perspective); the z-buffer keeps the **maximum** `1/w` (closer =
    larger `1/w`), i.e. the nearer point wins; back-face culling by the
-   camera-space normal; a separate edge pass (`@`) for readable shapes.
+   camera-space normal; a separate edge pass (`@`) for readable shapes. Per face:
+   world normal + centroid → `Lighting.computeFaceLight` (Lambert + ambient over
+   `scene.lights`); glyph = `GlyphMap.byIntensity(luminance)` or, when textured,
+   the texture glyph sampled at perspective-correct `u,v`; color = material ×
+   light (per-cell).
 5. **flush** — buffer rows are drawn to the canvas with `fillText` row by row,
-   splitting runs of one color (meshId) by the `Config.MESH_PALETTE` palette.
+   grouping runs by (glyph, color) pair (per-cell RGB from lighting/textures;
+   falls back to the `Config.MESH_PALETTE` palette when no per-cell color is set).
 
 ### Inter-module contracts (stable interfaces)
 
@@ -145,12 +152,24 @@ ascii3d/
 - **New built-in scene** — `scenes/x.js` calling
   `A3D.SceneRegistry.registerScene(name, data)` + a `<script>` tag in `index.html`.
 
-### Stubs for future features (stage 7)
+### Lighting & textures (stage 7, implemented)
 
-- **Lighting** — `utils/Colors.js`: Lambert + ambient; the Rasterizer will later
-  pick a glyph from `GlyphMap.RAMP` by face intensity.
-- **Transparency** — a `transparent` flag + back-to-front sorting, glyph blending.
-- **Textures** — vertex UV coordinates → picking a glyph from a 2D texture.
+- **Lighting** — `js/render/Lighting.js`: point (omni, distance attenuation) and
+  directional (parallel) light sources; flat-shading Lambert + ambient
+  (`Config.AMBIENT`). The Rasterizer computes a per-face world normal + centroid,
+  calls `Lighting.computeFaceLight`, and picks the glyph from `GlyphMap.RAMP` by
+  luminance (or a texture glyph when textured); color = material × light
+  (per-cell via `FrameBuffer.setCellColor`). Sources live in `scene.lights`
+  (parsed by `SceneLoader`, serialized by `Scene.toJSON()` — round-trip safe).
+- **Textures** — `js/render/Texture.js`: named ASCII texture registry
+  (`brick`, `checker`, `window`, `grass`, `water`), `sample(tex, u, v)` with
+  bilinear intensity + clamp, per-face-group UV generation
+  (`generateFaceUVs`). Each face gets `faces[i].uv` (per-corner, parallel to
+  `indices`); the Rasterizer interpolates `u/w`, `v/w`, `1/w` for
+  perspective-correct sampling. Assign via `"texture": "name"` (all faces) or
+  `"textures": { "front": "window", ... }` (per face group) in scene JSON.
+- **Transparency** — not yet: a `transparent` flag + back-to-front sorting,
+  glyph blending.
 - **Quaternions / LOD / object picker (raycast)** — see `PLAN.md`, section 7.
 
 ## Tests
@@ -168,4 +187,10 @@ MVP is complete (stages 0–6 of `ROADMAP.md`): movement/look (mouse + keyboard)
 4 built-in scenes, adding objects via hotkeys 1–5, scene save/load, per-mesh
 colored rendering by palette, optimizations (back-face, frustum culling,
 back-to-front sort), and fixes to the z-test and frustum culling of flat meshes.
-Next — stage 7 (lighting, transparency, textures).
+
+Stage 7 is in progress: **lighting** (point + directional sources, Lambert +
+ambient, per-cell color) and **textures** (named ASCII texture registry,
+per-face-group UV, perspective-correct sampling) are implemented and integrated
+into the built-in scenes (`city_block`, `desert`, `character_demo`). See
+`FEATURES_PLAN.md` (stages A–C ✅) for details. Remaining: transparency,
+quaternions, LOD, object picker.
