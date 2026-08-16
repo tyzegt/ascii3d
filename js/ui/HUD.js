@@ -1,0 +1,89 @@
+window.A3D = window.A3D || {};
+A3D.modules = A3D.modules || {};
+
+A3D.modules.HUD = (function () {
+    'use strict';
+
+    var Debug = A3D.modules.Debug;
+
+    var visible = true;
+    var el = null;
+    var fpsEl = null;
+    var posEl = null;
+    var sceneEl = null;
+    var hintsEl = null;
+
+    function build() {
+        if (el) {
+            return;
+        }
+        el = document.createElement('div');
+        el.id = 'hud';
+        el.style.position = 'fixed';
+        el.style.top = '10px';
+        el.style.left = '10px';
+        el.style.zIndex = '10';
+        el.style.color = '#0f0';
+        el.style.fontFamily = 'monospace';
+        el.style.fontSize = '13px';
+        el.style.lineHeight = '1.5';
+        el.style.textShadow = '0 0 4px #000';
+        el.style.pointerEvents = 'none';
+        el.style.whiteSpace = 'pre';
+        el.innerHTML =
+            '<span id="hud-fps">FPS: -</span>\n' +
+            '<span id="hud-pos">pos: -</span>\n' +
+            '<span id="hud-scene">scene: -</span>\n' +
+            '<span id="hud-hints">WASD/QE - move, mouse - look (click), R - reset, H - hud, Tab - menu</span>';
+        document.body.appendChild(el);
+        fpsEl = document.getElementById('hud-fps');
+        posEl = document.getElementById('hud-pos');
+        sceneEl = document.getElementById('hud-scene');
+        hintsEl = document.getElementById('hud-hints');
+        Debug.log('HUD', 'initialized');
+    }
+
+    return {
+        init: function () {
+            build();
+        },
+
+        setVisible: function (value) {
+            visible = !!value;
+            if (el) {
+                el.style.display = visible ? '' : 'none';
+            }
+        },
+
+        toggle: function () {
+            this.setVisible(!visible);
+            return visible;
+        },
+
+        isVisible: function () {
+            return visible;
+        },
+
+        setSceneName: function (name) {
+            if (sceneEl) {
+                sceneEl.textContent = 'scene: ' + name;
+            }
+        },
+
+        update: function (camera, fps) {
+            if (!visible || !el) {
+                return;
+            }
+            if (fpsEl && fps !== undefined) {
+                fpsEl.textContent = 'FPS: ' + fps;
+            }
+            if (posEl && camera) {
+                var p = camera.position;
+                posEl.textContent = 'pos: ' +
+                    p.x.toFixed(2) + ', ' +
+                    p.y.toFixed(2) + ', ' +
+                    p.z.toFixed(2);
+            }
+        }
+    };
+})();

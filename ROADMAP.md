@@ -41,18 +41,23 @@
 
 ---
 
-## Этап 2 — Камера + ввод
+## Этап 2 — Камера + ввод ✅
 **Цель:** свободное перемещение, координаты в HUD.
 
-- `core/Camera.js` — `position, yaw, pitch, fov, aspect, near, far`;
-  `moveForward/back/left/right`, `rotate`, `lookAt`; view-матрица по yaw/pitch;
-  clamp pitch ±89°.
-- `core/Input.js` — WASD, Q/E, стрелки, мышь (Pointer Lock + re-request),
-  R/H/Tab/1–9.
-- `ui/HUD.js` (заглушка) — вывод позиции камеры.
+- [x] `core/Camera.js` — `position, yaw, pitch, fov, aspect, near, far`;
+  `moveForward/back/left/right`, `moveUp/Down`, `rotate`, `lookAt`, `reset`;
+  view-матрица по yaw/pitch; clamp pitch ±89°.
+- [x] `core/Input.js` — WASD, Q/E, стрелки (альтернатива), мышь
+  (Pointer Lock + re-request по клику), R (сброс камеры), H (HUD),
+  1–9 (заглушка под добавление примитивов).
+- [x] `ui/HUD.js` (заглушка) — FPS, позиция камеры, имя сцены, подсказки.
+- [x] `main.js` — game loop (`requestAnimationFrame`, dt с clamp), resize,
+  связка Input → Camera → HUD.
 
-**Приёмка:** WASD/мышь двигают камеру, HUD показывает координаты, pitch не
-переворачивается.
+**Приёмка:** WASD/QE/стрелки двигают камеру, мышь — обзор (Pointer Lock),
+HUD показывает координаты и FPS, pitch не переворачивается. ✅ (проверено
+через локальный сервер: консоль чиста, WASD/QE/R/H работают, координаты
+в HUD корректны, FPS стабильный)
 
 ---
 
@@ -127,9 +132,9 @@
 | Этап | Статус |
 |---|---|
 | 0 — Скаффолдинг | ✅ выполнено |
-| 1 — Математическое ядро | ⏳ следующий |
-| 2 — Камера + ввод | ⬜ |
-| 3 — FrameBuffer + адаптивный canvas | ⬜ |
+| 1 — Математическое ядро | ✅ выполнено |
+| 2 — Камера + ввод | ✅ выполнено |
+| 3 — FrameBuffer + адаптивный canvas | ⏳ следующий |
 | 4 — Сцена, примитивы, лоадер | ⬜ |
 | 5 — Рендеринг | ⬜ |
 | 6 — UI, полировка, документация | ⬜ |
