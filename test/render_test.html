@@ -610,8 +610,19 @@
                 assertClose('direction normalized x', dl.direction.x, 0);
             }
 
+            // normalizeLight: valid spot light (cone defaults from Config)
+            var sl = Lighting.normalizeLight({ type: 'spot', color: [1, 0.95, 0.7], intensity: 3, position: [0, 0, 5], direction: [0, 0, -1] });
+            assertTrue('normalizeLight spot ok', !!sl && sl.type === 'spot');
+            if (sl) {
+                assertClose('spot half angle default', sl.coneHalfAngle, Config.SPOT_CONE_HALF_ANGLE, 1e-6);
+                assertClose('spot inner cone default', sl.innerCone, Config.SPOT_INNER_CONE, 1e-6);
+                assertTrue('spot direction is Vec3', sl.direction instanceof Vec3);
+            }
+
             // normalizeLight: bad inputs -> null
-            assertTrue('bad type -> null', Lighting.normalizeLight({ type: 'spot' }) === null);
+            assertTrue('bad type -> null', Lighting.normalizeLight({ type: 'laser' }) === null);
+            assertTrue('spot w/o position -> null', Lighting.normalizeLight({ type: 'spot', color: [1, 1, 1], direction: [0, 0, -1] }) === null);
+            assertTrue('spot w/o direction -> null', Lighting.normalizeLight({ type: 'spot', color: [1, 1, 1], position: [0, 0, 5] }) === null);
             assertTrue('missing color -> null', Lighting.normalizeLight({ type: 'point', position: [1, 2, 3] }) === null);
             assertTrue('point w/o position -> null', Lighting.normalizeLight({ type: 'point', color: [1, 1, 1] }) === null);
             assertTrue('directional w/o direction -> null', Lighting.normalizeLight({ type: 'directional', color: [1, 1, 1] }) === null);
@@ -659,6 +670,35 @@
             // point light behind the face (normal away) -> ambient only
             var behind = Lighting.computeFaceLight(new Vec3(0, 1, 0), new Vec3(0, 3, 0), plight);
             assertClose('point behind face: ambient only', behind.r, Config.AMBIENT, 1e-5);
+
+            // ---------- spot light (cone) ----------
+            // Camera-style flashlight at origin pointing -z; face on the beam axis.
+            var spot = Lighting.normalizeLight({ type: 'spot', color: [1, 0.95, 0.7], intensity: 2, position: [0, 0, 0], direction: [0, 0, -1] });
+            // face 4 units ahead on axis, normal facing the light (+z) -> full cone (inner core)
+            var spotOnAxis = Lighting.computeFaceLight(new Vec3(0, 0, 1), new Vec3(0, 0, -4), [spot]);
+            var expSpotAtt = 1 / (1 + Config.POINT_ATTENUATION_K * 16); // d=4
+            assertClose('spot on axis: ambient + 2*att(4)', spotOnAxis.r, Config.AMBIENT + 2 * expSpotAtt, 1e-4);
+            assertTrue('spot g channel tinted (b < g < r)', spotOnAxis.b < spotOnAxis.g && spotOnAxis.g < spotOnAxis.r,
+                'r=' + spotOnAxis.r + ' g=' + spotOnAxis.g + ' b=' + spotOnAxis.b);
+
+            // face behind the spotlight -> outside cone -> ambient only
+            var spotBehind = Lighting.computeFaceLight(new Vec3(0, 0, -1), new Vec3(0, 0, 4), [spot]);
+            assertClose('spot behind source: ambient only', spotBehind.r, Config.AMBIENT, 1e-5);
+
+            // face way outside the cone (perpendicular, far from axis) -> ambient only
+            var spotOutside = Lighting.computeFaceLight(new Vec3(-1, 0, 0), new Vec3(10, 0, -4), [spot]);
+            assertClose('spot outside cone: ambient only', spotOutside.r, Config.AMBIENT, 1e-5);
+
+            // face at the cone edge (half-angle) -> falloff ~0 vs on-axis full
+            var half = Config.SPOT_CONE_HALF_ANGLE;
+            var edgePos = new Vec3(Math.sin(half) * 4, 0, -Math.cos(half) * 4);
+            var spotEdge = Lighting.computeFaceLight(new Vec3(0, 0, 1), edgePos, [spot]);
+            assertTrue('spot at cone edge dimmer than on axis', spotEdge.r < spotOnAxis.r - 0.05,
+                'edge=' + spotEdge.r + ' axis=' + spotOnAxis.r);
+
+            // attenuation applies to spot too: farther face is darker
+            var spotFar = Lighting.computeFaceLight(new Vec3(0, 0, 1), new Vec3(0, 0, -8), [spot]);
+            assertTrue('spot attenuates with distance', spotFar.r < spotOnAxis.r, 'far=' + spotFar.r + ' near=' + spotOnAxis.r);
 
             // two lights add up (clamped to 1)
             var both = Lighting.computeFaceLight(new Vec3(0, 1, 0), p, sunDown.concat(plight));

@@ -22,6 +22,9 @@ A3D.modules.Main = (function () {
     var fpsTimer = 0;
     var fpsFrames = 0;
 
+    // Фонарик: spot-свет, привязанный к камере (клавиша F).
+    var flashlightOn = false;
+
     function boot() {
         var expected = [
             'Debug',
@@ -155,6 +158,8 @@ A3D.modules.Main = (function () {
             Debug.log('Main', 'camera reset');
         } else if (e.code === 'KeyH') {
             hud.toggle();
+        } else if (e.code === 'KeyF') {
+            toggleFlashlight();
         } else if (e.code === 'KeyP') {
             saveScene();
         } else if (e.code >= 'Digit1' && e.code <= 'Digit9') {
@@ -177,6 +182,8 @@ A3D.modules.Main = (function () {
 
     function applyScene(newScene) {
         scene = newScene;
+        // Новый список lights из сцены: фонарик добавляется поверх него.
+        removeFlashlightLight();
         if (scene && scene.camera && scene.camera.position) {
             var c = scene.camera;
             camera.setView(
@@ -187,6 +194,56 @@ A3D.modules.Main = (function () {
         }
         hud.setSceneName(scene ? scene.name : 'default');
         Debug.log('Main', 'scene loaded: "' + (scene && scene.name) + '"');
+    }
+
+    // Фонарик —spot-свет в scene.lights; позиция/направление обновляются
+    // каждый кадр из камеры (updateFlashlight), поэтому он следует за взглядом.
+    function toggleFlashlight() {
+        if (!scene) return;
+        flashlightOn = !flashlightOn;
+        if (flashlightOn) {
+            var L = A3D.modules.Lighting.normalizeLight({
+                type: 'spot',
+                color: Config.FLASHLIGHT_COLOR,
+                intensity: Config.FLASHLIGHT_INTENSITY,
+                position: [camera.position.x, camera.position.y, camera.position.z],
+                direction: [0, 0, -1],
+                coneHalfAngle: Config.SPOT_CONE_HALF_ANGLE,
+                innerCone: Config.SPOT_INNER_CONE
+            });
+            if (L) {
+                L._flashlight = true;
+                scene.lights.push(L);
+            }
+            Debug.log('Main', 'flashlight ON');
+        } else {
+            removeFlashlightLight();
+            Debug.log('Main', 'flashlight OFF');
+        }
+    }
+
+    function updateFlashlight() {
+        if (!flashlightOn || !scene) return;
+        for (var i = scene.lights.length - 1; i >= 0; i--) {
+            var L = scene.lights[i];
+            if (!L || !L._flashlight) continue;
+            L.position.x = camera.position.x;
+            L.position.y = camera.position.y;
+            L.position.z = camera.position.z;
+            var fwd = camera.forward();
+            L.direction.x = fwd.x;
+            L.direction.y = fwd.y;
+            L.direction.z = fwd.z;
+        }
+    }
+
+    function removeFlashlightLight() {
+        if (!scene) return;
+        for (var i = scene.lights.length - 1; i >= 0; i--) {
+            if (scene.lights[i] && scene.lights[i]._flashlight) {
+                scene.lights.splice(i, 1);
+            }
+        }
     }
 
     // Hotkeys 1-9 spawn a primitive in front of the camera.
@@ -277,6 +334,7 @@ A3D.modules.Main = (function () {
 
         input.update(camera, dt);
         if (scene) scene.update(dt);
+        updateFlashlight();
 
         fpsFrames++;
         fpsTimer += dt;

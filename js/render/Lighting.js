@@ -5,7 +5,8 @@ A3D.modules = A3D.modules || {};
 // Модель на грань:
 //   contribution = lightColor * intensity
 //                  * max(0, dot(normal, toLight))          (Ламберт)
-//                  * attenuation                           (point: 1/(1+K*d^2))
+//                  * attenuation                           (point/spot: 1/(1+K*d^2))
+//                  * cone                                  (spot: плавный конус)
 //   lightRGB = ambient*white + Σ contributions             (clamp 0..1)
 A3D.modules.Lighting = (function () {
     'use strict';
@@ -39,12 +40,14 @@ A3D.modules.Lighting = (function () {
     // Приводит сырой объект света из JSON к канонической форме.
     //   point:       { type:'point', color:[r,g,b], intensity, position:[x,y,z] }
     //   directional: { type:'directional', color:[r,g,b], intensity, direction:[dx,dy,dz] }
+    //   spot:        { type:'spot', color:[r,g,b], intensity, position:[x,y,z],
+    //                  direction:[dx,dy,dz], coneHalfAngle (рад), innerCone (0..1) }
     // Возвращает нормализованный объект или null (битые данные — пропускаем с логом).
     function normalizeLight(raw) {
         if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
 
         var type = (typeof raw.type === 'string') ? raw.type : '';
-        if (type !== 'point' && type !== 'directional') {
+        if (type !== 'point' && type !== 'directional' && type !== 'spot') {
             Debug.warn('Lighting', 'normalizeLight: bad type "' + type + '", light skipped');
             return null;
         }
@@ -66,6 +69,34 @@ A3D.modules.Lighting = (function () {
             return { type: 'point', color: color, intensity: intensity, position: pos };
         }
 
+        if (type === 'spot') {
+            var spos = vec3FromArr(raw.position);
+            if (!spos) {
+                Debug.warn('Lighting', 'normalizeLight: spot light has bad position, skipped');
+                return null;
+            }
+            var sdir = vec3FromArr(raw.direction);
+            if (!sdir) {
+                Debug.warn('Lighting', 'normalizeLight: spot light has bad direction, skipped');
+                return null;
+            }
+            sdir = sdir.normalize();
+            if (sdir.length() === 0) {
+                Debug.warn('Lighting', 'normalizeLight: spot zero-length direction, skipped');
+                return null;
+            }
+            // coneHalfAngle — половина угла конуса (рад); innerCone — доля жёсткого
+            // ядра (1 = резкая граница, 0 = равномерно до края). Defaults из Config.
+            var half = isNum(raw.coneHalfAngle) ? raw.coneHalfAngle : Config.SPOT_CONE_HALF_ANGLE;
+            if (!(half > 0)) half = Config.SPOT_CONE_HALF_ANGLE;
+            var inner = isNum(raw.innerCone) ? clamp(raw.innerCone, 0, 1) : Config.SPOT_INNER_CONE;
+            return {
+                type: 'spot', color: color, intensity: intensity,
+                position: spos, direction: sdir,
+                coneHalfAngle: half, innerCone: inner
+            };
+        }
+
         var dir = vec3FromArr(raw.direction);
         if (!dir) {
             Debug.warn('Lighting', 'normalizeLight: directional light has bad direction, skipped');
@@ -79,10 +110,24 @@ A3D.modules.Lighting = (function () {
         return { type: 'directional', color: color, intensity: intensity, direction: dir };
     }
 
-    // Аттенюация point-света на расстоянии d: 1/(1 + K*d^2).
+    // Аттенюация point/spot-света на расстоянии d: 1/(1 + K*d^2).
     function attenuation(d) {
         var k = (isNum(Config.POINT_ATTENUATION_K)) ? Config.POINT_ATTENUATION_K : 0;
         return 1 / (1 + k * d * d);
+    }
+
+    // Конус spot-света: cosDot = cos угла между direction света и направлением
+    // к точке. Возвращает множитель 0..1: innerCone — жёсткое ядро (полная
+    // яркость), дальше плавный спад до нуля на границе coneHalfAngle.
+    function coneFactor(cosDot, L) {
+        var cosOuter = Math.cos(L.coneHalfAngle);
+        if (cosDot <= cosOuter) return 0;
+        var inner = L.innerCone;
+        if (inner >= 1) return 1;
+        var cosInner = Math.cos(L.coneHalfAngle * inner);
+        if (cosDot >= cosInner) return 1;
+        var t = (cosDot - cosOuter) / (cosInner - cosOuter);
+        return clamp(t, 0, 1);
     }
 
     // Свет на грань (flat-shading).
@@ -104,6 +149,7 @@ A3D.modules.Lighting = (function () {
 
                 var toLightDir;
                 var att = 1;
+                var cone = 1;
                 if (L.type === 'point') {
                     var delta = L.position.sub(posWorld);
                     var dist = delta.length();
@@ -113,6 +159,16 @@ A3D.modules.Lighting = (function () {
                     }
                     toLightDir = new Vec3(delta.x / dist, delta.y / dist, delta.z / dist);
                     att = attenuation(dist);
+                } else if (L.type === 'spot') {
+                    // direction — вектор, КУДА светит конус. Точка вне конуса → 0.
+                    var sdelta = posWorld.sub(L.position);
+                    var sdist = sdelta.length();
+                    if (sdist < 1e-6) continue;
+                    var cosDot = L.direction.dot(sdelta.scale(1 / sdist));
+                    cone = coneFactor(cosDot, L);
+                    if (cone <= 0) continue;
+                    toLightDir = new Vec3(-L.direction.x, -L.direction.y, -L.direction.z);
+                    att = attenuation(sdist);
                 } else {
                     // directional.direction — вектор, КУДА светит (от источника к сцене).
                     toLightDir = L.direction.scale(-1);
@@ -121,7 +177,7 @@ A3D.modules.Lighting = (function () {
                 var lamberTerm = normalWorld.dot(toLightDir);
                 if (lamberTerm <= 0) continue;
 
-                var s = L.intensity * lamberTerm * att;
+                var s = L.intensity * lamberTerm * att * cone;
                 r += L.color[0] * s;
                 g += L.color[1] * s;
                 b += L.color[2] * s;
