@@ -25,7 +25,7 @@
 
 ---
 
-## Этап 1 — Математическое ядро
+## Этап 1 — Математическое ядро ✅
 **Цель:** Vec3, Mat4, юнит-проверки.
 
 - `core/Vec3.js` — `add/sub/scale/dot/cross/normalize/length/transform`.

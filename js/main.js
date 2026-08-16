@@ -10,6 +10,8 @@ A3D.modules.Main = (function () {
         var expected = [
             'Debug',
             'MathUtils',
+            'Vec3',
+            'Mat4',
             'Config'
         ];
 

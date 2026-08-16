@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>A3D Tests — Этап 1</title>
+    <style>
+        body {
+            font-family: monospace;
+            font-size: 14px;
+            background: #111;
+            color: #0f0;
+            padding: 20px;
+        }
+        h1 { color: #0f0; font-size: 18px; }
+        .section { margin-top: 16px; color: #888; }
+        .pass { color: #0f0; }
+        .fail { color: #f44; }
+        .summary { margin-top: 24px; font-size: 16px; }
+    </style>
+</head>
+<body>
+    <h1>A3D — Этап 1: Математическое ядро</h1>
+    <div id="output"></div>
+
+    <script>
+        var _cb = Date.now();
+        document.write('<script src="../js/core/MathUtils.js?v=' + _cb + '"><\/script>');
+        document.write('<script src="../js/core/Vec3.js?v=' + _cb + '"><\/script>');
+        document.write('<script src="../js/core/Mat4.js?v=' + _cb + '"><\/script>');
+    </script>
+    <script>
+    (function () {
+        'use strict';
+
+        var Vec3 = A3D.modules.Vec3;
+        var Mat4 = A3D.modules.Mat4;
+        var MathUtils = A3D.modules.MathUtils;
+
+        var output = document.getElementById('output');
+        var passed = 0;
+        var failed = 0;
+        var currentSection = '';
+
+        function section(name) {
+            currentSection = name;
+            var div = document.createElement('div');
+            div.className = 'section';
+            div.textContent = '— ' + name + ' —';
+            output.appendChild(div);
+        }
+
+        function assertClose(label, actual, expected, eps) {
+            if (eps === undefined) eps = 1e-6;
+            var ok = Math.abs(actual - expected) <= eps;
+            report(label, ok, actual, expected, eps);
+        }
+
+        function assertVec3(label, v, ex, ey, ez, eps) {
+            if (eps === undefined) eps = 1e-6;
+            var ok = Math.abs(v.x - ex) <= eps &&
+                     Math.abs(v.y - ey) <= eps &&
+                     Math.abs(v.z - ez) <= eps;
+            if (ok) {
+                report(label, true, '(' + v.x.toFixed(6) + ',' + v.y.toFixed(6) + ',' + v.z.toFixed(6) + ')');
+            } else {
+                report(label, false,
+                    '(' + v.x.toFixed(6) + ',' + v.y.toFixed(6) + ',' + v.z.toFixed(6) + ')',
+                    '(' + ex + ',' + ey + ',' + ez + ')');
+            }
+        }
+
+        function assertTrue(label, cond, detail) {
+            report(label, !!cond, detail);
+        }
+
+        function report(label, ok, actual, expected) {
+            var line = document.createElement('div');
+            if (ok) {
+                passed++;
+                line.className = 'pass';
+                line.textContent = 'PASS  ' + currentSection + ': ' + label;
+            } else {
+                failed++;
+                line.className = 'fail';
+                var msg = 'FAIL  ' + currentSection + ': ' + label;
+                if (actual !== undefined) msg += '  actual=' + actual;
+                if (expected !== undefined) msg += '  expected=' + expected;
+                line.textContent = msg;
+            }
+            output.appendChild(line);
+            if (!ok) {
+                console.error('FAIL', currentSection, label, { actual: actual, expected: expected });
+            }
+        }
+
+        function testVec3() {
+            section('Vec3');
+
+            var a = new Vec3(1, 2, 3);
+            var b = new Vec3(4, 5, 6);
+
+            var sum = a.add(b);
+            assertVec3('add', sum, 5, 7, 9);
+
+            var diff = b.sub(a);
+            assertVec3('sub', diff, 3, 3, 3);
+
+            var scaled = a.scale(2);
+            assertVec3('scale', scaled, 2, 4, 6);
+
+            assertClose('dot (orthogonal)', new Vec3(1, 0, 0).dot(new Vec3(0, 1, 0)), 0);
+            assertClose('dot (same)', new Vec3(1, 2, 3).dot(new Vec3(1, 2, 3)), 14);
+
+            var cross = new Vec3(1, 0, 0).cross(new Vec3(0, 1, 0));
+            assertVec3('cross x×y=z', cross, 0, 0, 1);
+            var cross2 = new Vec3(0, 1, 0).cross(new Vec3(0, 0, 1));
+            assertVec3('cross y×z=x', cross2, 1, 0, 0);
+
+            assertClose('length (3,4,0)', new Vec3(3, 4, 0).length(), 5);
+            assertClose('length (1,1,1)', new Vec3(1, 1, 1).length(), Math.sqrt(3));
+
+            var n = new Vec3(0, 2, 0).normalize();
+            assertVec3('normalize (0,2,0)', n, 0, 1, 0);
+            var n2 = new Vec3(1, 0, 0).normalize();
+            assertVec3('normalize (1,0,0)', n2, 1, 0, 0);
+
+            var zero = new Vec3(0, 0, 0).normalize();
+            assertVec3('normalize zero vector', zero, 0, 0, 0);
+
+            var t = a.transform(Mat4.translation(10, 20, 30));
+            assertVec3('transform translation', t, 11, 22, 33);
+
+            var s = a.transform(Mat4.scaling(2, 3, 4));
+            assertVec3('transform scaling', s, 2, 6, 12);
+        }
+
+        function testMat4() {
+            section('Mat4');
+
+            var I = Mat4.identity();
+            var p = new Vec3(1, 2, 3);
+            var t = p.transform(I);
+            assertVec3('identity transform', t, 1, 2, 3);
+
+            var T = Mat4.translation(5, -3, 2);
+            var tp = new Vec3(1, 1, 1).transform(T);
+            assertVec3('translation transform', tp, 6, -2, 3);
+
+            var S = Mat4.scaling(2, 3, 4);
+            var sp = new Vec3(1, 1, 1).transform(S);
+            assertVec3('scaling transform', sp, 2, 3, 4);
+
+            var M = Mat4.multiply(T, S);
+            var mp = new Vec3(1, 1, 1).transform(M);
+            assertVec3('multiply (T·S) transform', mp, 7, 0, 6);
+
+            var invT = Mat4.invert(T);
+            var back = new Vec3(6, -2, 3).transform(invT);
+            assertVec3('invert translation', back, 1, 1, 1);
+
+            var invS = Mat4.invert(S);
+            var backS = new Vec3(2, 3, 4).transform(invS);
+            assertVec3('invert scaling', backS, 1, 1, 1);
+
+            var R = Mat4.rotationY(Math.PI / 2);
+            var rp = new Vec3(1, 0, 0).transform(R);
+            assertVec3('rotateY 90°: (1,0,0)→(0,0,-1)', rp, 0, 0, -1);
+
+            var Rp = new Vec3(0, 0, -1).transform(R);
+            assertVec3('rotateY 90°: (0,0,-1)→(-1,0,0)', Rp, -1, 0, 0);
+
+            var RX = Mat4.rotationX(Math.PI / 2);
+            var rx = new Vec3(0, 1, 0).transform(RX);
+            assertVec3('rotateX 90°: (0,1,0)→(0,0,1)', rx, 0, 0, 1);
+
+            var RZ = Mat4.rotationZ(Math.PI / 2);
+            var rz = new Vec3(1, 0, 0).transform(RZ);
+            assertVec3('rotateZ 90°: (1,0,0)→(0,1,0)', rz, 0, 1, 0);
+
+            var M2 = Mat4.multiply(T, S);
+            var M2inv = Mat4.invert(M2);
+            var product = Mat4.multiply(M2, M2inv);
+            var check = new Vec3(0.7, -1.3, 4.2).transform(product);
+            assertVec3('M·M⁻¹=I (point)', check, 0.7, -1.3, 4.2);
+
+            var T2 = Mat4.translation(1, 2, 3);
+            var R2 = Mat4.rotationY(0.7);
+            var S2 = Mat4.scaling(2, 3, 5);
+            var M3 = Mat4.multiply(Mat4.multiply(T2, R2), S2);
+            var M3inv = Mat4.invert(M3);
+            var product3 = Mat4.multiply(M3, M3inv);
+            var check3 = new Vec3(3.3, -1.7, 0.9).transform(product3);
+            assertVec3('M·M⁻¹=I (TRS)', check3, 3.3, -1.7, 0.9);
+
+            var eye = new Vec3(0, 5, 20);
+            var target = new Vec3(0, 0, 0);
+            var up = new Vec3(0, 1, 0);
+            var V = Mat4.lookAt(eye, target, up);
+            var camTarget = target.transform(V);
+            assertVec3('lookAt: target→origin', camTarget, 0, 0, 0);
+            var camEye = eye.transform(V);
+            assertVec3('lookAt: eye→+z axis', camEye, 0, 0, Math.sqrt(425));
+
+            var P = Mat4.perspective(70, 16 / 9, 0.1, 500);
+            var pt1 = new Vec3(0, 0, -1).transform(P);
+            assertClose('perspective: (0,0,-1) w=1', pt1.y, 0);
+            var pt2 = new Vec3(1, 0, -1).transform(P);
+            assertClose('perspective: (1,0,-1) x>0', pt2.x, 1 / (16 / 9) / Math.tan(MathUtils.degToRad(35)));
+            var pt3 = new Vec3(0, 1, -1).transform(P);
+            assertClose('perspective: (0,1,-1) y>0', pt3.y, 1 / Math.tan(MathUtils.degToRad(35)));
+
+            var nearPt4 = new Vec3(0, 0, -0.1).transformW(P);
+            assertClose('perspective: near plane z/w=-1', nearPt4.z / nearPt4.w, -1, 1e-4);
+            var farPt4 = new Vec3(0, 0, -500).transformW(P);
+            assertClose('perspective: far plane z/w=1', farPt4.z / farPt4.w, 1, 1e-4);
+
+            var dir = new Vec3(1, 0, 0);
+            var td = dir.transformDirection(Mat4.translation(10, 20, 30));
+            assertVec3('transformDirection ignores translation', td, 1, 0, 0);
+        }
+
+        testVec3();
+        testMat4();
+
+        var summary = document.createElement('div');
+        summary.className = 'summary';
+        if (failed === 0) {
+            summary.style.color = '#0f0';
+            summary.textContent = '✓ ALL TESTS PASSED: ' + passed + ' passed, 0 failed';
+            console.log('%cA3D TESTS: ALL PASSED (' + passed + ')', 'color: #0f0; font-size: 16px;');
+        } else {
+            summary.style.color = '#f44';
+            summary.textContent = '✗ TESTS FAILED: ' + passed + ' passed, ' + failed + ' failed';
+            console.error('A3D TESTS: ' + failed + ' failed, ' + passed + ' passed');
+        }
+        output.appendChild(summary);
+    })();
+    </script>
+</body>
+</html>
