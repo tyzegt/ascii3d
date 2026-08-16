@@ -10,6 +10,7 @@ A3D.modules.HUD = (function () {
     var el = null;
     var fpsEl = null;
     var posEl = null;
+    var rotEl = null;
     var sceneEl = null;
     var gridEl = null;
     var hintsEl = null;
@@ -34,6 +35,7 @@ A3D.modules.HUD = (function () {
         el.innerHTML =
             '<span id="hud-fps">FPS: -</span>\n' +
             '<span id="hud-pos">pos: -</span>\n' +
+            '<span id="hud-rot">rot: -</span>\n' +
             '<span id="hud-scene">scene: -</span>\n' +
             '<span id="hud-grid">grid: -</span>\n' +
             '<span id="hud-hints">WASD/QE move, mouse look (click)\n' +
@@ -41,6 +43,7 @@ A3D.modules.HUD = (function () {
         document.body.appendChild(el);
         fpsEl = document.getElementById('hud-fps');
         posEl = document.getElementById('hud-pos');
+        rotEl = document.getElementById('hud-rot');
         sceneEl = document.getElementById('hud-scene');
         gridEl = document.getElementById('hud-grid');
         hintsEl = document.getElementById('hud-hints');
@@ -84,12 +87,20 @@ A3D.modules.HUD = (function () {
             if (gridEl && grid) {
                 gridEl.textContent = 'grid: ' + grid;
             }
-            if (posEl && camera) {
+            if (camera) {
                 var p = camera.position;
-                posEl.textContent = 'pos: ' +
-                    p.x.toFixed(2) + ', ' +
-                    p.y.toFixed(2) + ', ' +
-                    p.z.toFixed(2);
+                if (posEl) {
+                    posEl.textContent = 'pos: ' +
+                        p.x.toFixed(2) + ', ' +
+                        p.y.toFixed(2) + ', ' +
+                        p.z.toFixed(2);
+                }
+                if (rotEl) {
+                    var rad2deg = 180 / Math.PI;
+                    rotEl.textContent = 'yaw: ' +
+                        (camera.yaw * rad2deg).toFixed(1) + '°, pitch: ' +
+                        (camera.pitch * rad2deg).toFixed(1) + '°';
+                }
             }
         }
     };
