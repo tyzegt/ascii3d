@@ -61,17 +61,20 @@ HUD показывает координаты и FPS, pitch не перевор�
 
 ---
 
-## Этап 3 — FrameBuffer + адаптивный canvas
+## Этап 3 — FrameBuffer + адаптивный canvas ✅
 **Цель:** вывод ascii-текста, размер сетки под окно.
 
-- `render/FrameBuffer.js` — 2D-массив `chars` + `depth` (1/w, `Infinity`),
-  `clear()`, `setCell()`, `flush(ctx)` построчно.
-- `render/GlyphMap.js` — символы по интенсивности.
-- `main.js` — resize: `canvas.width/height × devicePixelRatio`,
-  `measureText('M')` → charW/charH, пересчёт размера буфера.
+- [x] `render/FrameBuffer.js` — 2D-массив `chars` + `depth` (1/w, `Infinity`),
+  `clear()`, `setCell()` (z-buffer), `getChar/getDepth`, `flush(ctx)` построчно.
+- [x] `render/GlyphMap.js` — символы по интенсивности (`byIntensity`), base/edge/empty.
+- [x] `main.js` — resize: `canvas.width/height × devicePixelRatio`,
+  `measureText('M')` → charW/charH, пересчёт размера буфера; тестовый паттерн
+  (рамка + шахматная заливка + крест в центре).
 
 **Приёмка:** на весь экран рисуется ascii-сетка (напр. рамка/заливка), при resize
-перестраивается, на hiDPI чётко.
+перестраивается, на hiDPI чётко. ✅ (проверено через http://ascii3d.local.int/:
+консоль чиста, сетка 214x72 @ dpr=1.5 → 72x30 @ 640x480 → 181x75 @ dpr=2,
+z-buffer в setCell работает — ближний символ вытесняет дальний)
 
 ---
 
@@ -134,7 +137,7 @@ HUD показывает координаты и FPS, pitch не перевор�
 | 0 — Скаффолдинг | ✅ выполнено |
 | 1 — Математическое ядро | ✅ выполнено |
 | 2 — Камера + ввод | ✅ выполнено |
-| 3 — FrameBuffer + адаптивный canvas | ⏳ следующий |
-| 4 — Сцена, примитивы, лоадер | ⬜ |
+| 3 — FrameBuffer + адаптивный canvas | ✅ выполнено |
+| 4 — Сцена, примитивы, лоадер | ⏳ следующий |
 | 5 — Рендеринг | ⬜ |
 | 6 — UI, полировка, документация | ⬜ |

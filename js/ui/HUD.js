@@ -11,6 +11,7 @@ A3D.modules.HUD = (function () {
     var fpsEl = null;
     var posEl = null;
     var sceneEl = null;
+    var gridEl = null;
     var hintsEl = null;
 
     function build() {
@@ -34,11 +35,13 @@ A3D.modules.HUD = (function () {
             '<span id="hud-fps">FPS: -</span>\n' +
             '<span id="hud-pos">pos: -</span>\n' +
             '<span id="hud-scene">scene: -</span>\n' +
+            '<span id="hud-grid">grid: -</span>\n' +
             '<span id="hud-hints">WASD/QE - move, mouse - look (click), R - reset, H - hud, Tab - menu</span>';
         document.body.appendChild(el);
         fpsEl = document.getElementById('hud-fps');
         posEl = document.getElementById('hud-pos');
         sceneEl = document.getElementById('hud-scene');
+        gridEl = document.getElementById('hud-grid');
         hintsEl = document.getElementById('hud-hints');
         Debug.log('HUD', 'initialized');
     }
@@ -70,12 +73,15 @@ A3D.modules.HUD = (function () {
             }
         },
 
-        update: function (camera, fps) {
+        update: function (camera, fps, grid) {
             if (!visible || !el) {
                 return;
             }
             if (fpsEl && fps !== undefined) {
                 fpsEl.textContent = 'FPS: ' + fps;
+            }
+            if (gridEl && grid) {
+                gridEl.textContent = 'grid: ' + grid;
             }
             if (posEl && camera) {
                 var p = camera.position;
