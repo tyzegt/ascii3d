@@ -32,10 +32,33 @@ regardless; the IIS address is the canonical way to run and verify.
 | `R` | reset camera |
 | `H` | show/hide HUD |
 | `P` | save the current scene to a JSON file (Blob download) |
+| `` ` `` | toggle the debug console (teleport / camera commands) |
 
 Speed, sensitivity, FOV, near/far are constants in `js/core/Config.js`
 (defaults: FOV 70°, near 0.1, far 500, speed 8, sensitivity 0.003; plus
 `TURN_SPEED`/`LOOK_SPEED` for keyboard turning and `DEFAULT_SCENE`).
+
+## Debug console
+
+The `` ` `` key (Backquote) toggles an on-screen debug console (bottom-right,
+orange). It is for quick camera placement while debugging — no build, just type
+a command and press Enter. Position is in meters, angles in degrees; the same
+units the HUD shows.
+
+| Command | Action |
+|---|---|
+| `goto <x> <y> <z> [yawDeg] [pitchDeg]` | teleport the camera instantly; yaw/pitch are optional (kept as-is when omitted) |
+| `tp …` / `teleport …` | alias of `goto` |
+| `pos` | print current position + yaw/pitch |
+| `help` | list commands |
+
+Examples: `goto 10 5 -20 45 -30` (full transform), `tp 1 2 3` (move, keep the
+current orientation). Esc closes the console. Keys typed in the input field do
+not reach the game (the camera won't drift while you type WASD).
+
+The same functionality is available programmatically from the browser console:
+`A3D.modules.DebugConsole.teleport(x, y, z, yawDeg, pitchDeg)` and
+`A3D.modules.DebugConsole.execCommand('goto 1 2 3')`.
 
 ## Scenes
 
@@ -108,7 +131,8 @@ ascii3d/
     │   └── FrameBuffer.js  # 2D arrays chars + depth (1/w) + ids (meshId) + per-cell r/g/b, clear/setCell/setCellColor/flush
     ├── ui/
     │   ├── HUD.js          # overlay: FPS, position, yaw/pitch (in degrees), scene, grid+faces, hints
-    │   └── SceneMenu.js    # Tab scene menu + "Load from file…"
+    │   ├── SceneMenu.js    # Tab scene menu + "Load from file…"
+    │   └── DebugConsole.js # ` debug console: goto/tp teleport, pos, help; A3D.modules.DebugConsole API
     └── utils/
         ├── Colors.js       # stub for lighting (Lambert + ambient)
         └── Debug.js        # console.log with tags, on/off

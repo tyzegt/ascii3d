@@ -13,6 +13,7 @@ A3D.modules.Main = (function () {
     var input = null;
     var hud = null;
     var menu = null;
+    var debugConsole = null;
     var frameBuffer = null;
     var scene = null;
     var charW = 0;
@@ -51,7 +52,8 @@ A3D.modules.Main = (function () {
             'Rasterizer',
             'FrameBuffer',
             'HUD',
-            'SceneMenu'
+            'SceneMenu',
+            'DebugConsole'
         ];
 
         var missing = expected.filter(function (name) {
@@ -74,6 +76,7 @@ A3D.modules.Main = (function () {
         input = A3D.modules.Input;
         hud = A3D.modules.HUD;
         menu = A3D.modules.SceneMenu;
+        debugConsole = A3D.modules.DebugConsole;
         frameBuffer = new A3D.modules.FrameBuffer();
 
         registerPrimitiveTypes();
@@ -86,6 +89,7 @@ A3D.modules.Main = (function () {
         hud.init();
         hud.setSceneName(scene ? scene.name : 'default');
         menu.init(onMenuPick);
+        debugConsole.init(camera);
 
         input.onKeydown(onHotkey);
 
@@ -162,6 +166,8 @@ A3D.modules.Main = (function () {
             toggleFlashlight();
         } else if (e.code === 'KeyP') {
             saveScene();
+        } else if (e.code === 'Backquote' || e.code === 'IntlBackslash') {
+            debugConsole.toggle();
         } else if (e.code >= 'Digit1' && e.code <= 'Digit9') {
             var num = parseInt(e.code.charAt(5), 10);
             addPrimitiveByHotkey(num);
