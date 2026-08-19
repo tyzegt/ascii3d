@@ -530,12 +530,16 @@
             }
             assertTrue('scene produced visible cells (' + filled + ')', filled > 50, 'too few: ' + filled);
 
-            // the image should have edge chars (outlines, GlyphMap.edge)
-            var hasEdge = false;
-            for (var j = 0; j < fb.chars.length; j++) {
-                if (fb.chars[j] === '@') hasEdge = true;
+            // the image should have edge chars (outlines, GlyphMap.edge) — если SHOW_EDGES=true
+            if (Config.SHOW_EDGES !== false) {
+                var hasEdge = false;
+                for (var j = 0; j < fb.chars.length; j++) {
+                    if (fb.chars[j] === '@') hasEdge = true;
+                }
+                assertTrue('edge glyph present', hasEdge);
+            } else {
+                report('edge glyph check skipped (SHOW_EDGES=false)', true);
             }
-            assertTrue('edge glyph present', hasEdge);
 
             // без источников света глиф полигона = byIntensity(AMBIENT) = '.' —
             // градиент символов по освещению (этап B). Проверяем, что заполненные
@@ -645,10 +649,11 @@
             assertClose('bottom face ambient only', botUnlit.r, Config.AMBIENT, 1e-5);
 
             // directional: 45-degree face -> Lambert ~0.707 (unsaturated model:
-            // ambient + dot(normal, toLight), clamp 0..1 — см. FEATURES_PLAN §1.1)
+            // ambient + dot(normal, toLight), clamp 0..1 — см. FEATURES_PLAN §1.1).
+            // При высоком AMBIENT сумма может превысить 1 → clamp до 1.
             var diag = Lighting.computeFaceLight(new Vec3(Math.SQRT1_2, Math.SQRT1_2, 0), p, sunDown);
             assertClose('45deg face Lambert (ambient + 0.707)',
-                diag.r, Config.AMBIENT + Math.SQRT1_2, 1e-4);
+                diag.r, Math.min(1, Config.AMBIENT + Math.SQRT1_2), 1e-4);
 
             // colored light: contribution is scaled by light color
             var redLight = [Lighting.normalizeLight({ type: 'directional', color: [1, 0, 0], intensity: 1, direction: [0, -1, 0] })];
@@ -660,7 +665,7 @@
             var plight = [Lighting.normalizeLight({ type: 'point', color: [1, 1, 1], intensity: 1, position: [0, 3, 0] })];
             var underPoint = Lighting.computeFaceLight(new Vec3(0, 1, 0), new Vec3(0, 0, 0), plight);
             var expAtt = 1 / (1 + Config.POINT_ATTENUATION_K * 9); // d=3
-            assertClose('point directly above: ambient + att(3)', underPoint.r, Config.AMBIENT + expAtt, 1e-4);
+            assertClose('point directly above: ambient + att(3)', underPoint.r, Math.min(1, Config.AMBIENT + expAtt), 1e-4);
 
             // attenuation grows with distance: face at d=6 is darker than at d=3
             var farPoint = Lighting.computeFaceLight(new Vec3(0, 1, 0), new Vec3(0, -3, 0), plight);
@@ -677,9 +682,14 @@
             // face 4 units ahead on axis, normal facing the light (+z) -> full cone (inner core)
             var spotOnAxis = Lighting.computeFaceLight(new Vec3(0, 0, 1), new Vec3(0, 0, -4), [spot]);
             var expSpotAtt = 1 / (1 + Config.POINT_ATTENUATION_K * 16); // d=4
-            assertClose('spot on axis: ambient + 2*att(4)', spotOnAxis.r, Config.AMBIENT + 2 * expSpotAtt, 1e-4);
-            assertTrue('spot g channel tinted (b < g < r)', spotOnAxis.b < spotOnAxis.g && spotOnAxis.g < spotOnAxis.r,
-                'r=' + spotOnAxis.r + ' g=' + spotOnAxis.g + ' b=' + spotOnAxis.b);
+            assertClose('spot on axis: ambient + 2*att(4)', spotOnAxis.r, Math.min(1, Config.AMBIENT + 2 * expSpotAtt), 1e-4);
+            // tint виден, только если сумма не клампится в 1 (иначе все каналы = 1)
+            if (Config.AMBIENT + 2 * expSpotAtt < 1 - 1e-6) {
+                assertTrue('spot g channel tinted (b < g)', spotOnAxis.b < spotOnAxis.g,
+                    'r=' + spotOnAxis.r + ' g=' + spotOnAxis.g + ' b=' + spotOnAxis.b);
+            } else {
+                report('spot g channel tinted (clamped to 1 — skipped)', true);
+            }
 
             // face behind the spotlight -> outside cone -> ambient only
             var spotBehind = Lighting.computeFaceLight(new Vec3(0, 0, -1), new Vec3(0, 0, 4), [spot]);

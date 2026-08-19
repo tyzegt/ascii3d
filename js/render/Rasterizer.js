@@ -21,6 +21,25 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
         return [q(c[0]), q(c[1]), q(c[2])];
     }
 
+    // Неоновая цветокоррекция: насыщенность → усиление → гамма (подъём теней).
+    // Ввод/вывод 0..1; результат clamp'нуто в 0..1. Настройки — Config.NEON_*.
+    function isNumCfg(v) {
+        return typeof v === 'number' && isFinite(v);
+    }
+
+    function neonGrade(r, g, b) {
+        var sat = isNumCfg(Config.NEON_SATURATION) ? Config.NEON_SATURATION : 1;
+        var boost = isNumCfg(Config.NEON_BOOST) ? Config.NEON_BOOST : 1;
+        var gamma = (isNumCfg(Config.NEON_GAMMA) && Config.NEON_GAMMA > 0) ? Config.NEON_GAMMA : 1;
+        function c1(v) {
+            var l = 0.3 * r + 0.59 * g + 0.11 * b;
+            v = (l + (v - l) * sat) * boost;
+            if (v < 0) v = 0; else if (v > 1) v = 1;
+            return Math.pow(v, gamma);
+        }
+        return [c1(r), c1(g), c1(b)];
+    }
+
     // Draws one screen-space polygon (2-4 pts with invW) into the frame buffer.
     // Depth = interpolated 1/w (perspective-correct). Writes only where the
     // depth is closer than what's already stored (z-buffer test in setCell).
@@ -347,10 +366,15 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
         }
         var id = (mesh && mesh.meshId !== undefined) ? mesh.meshId : 0;
         var hex = Config.MESH_PALETTE[((id % Config.MESH_PALETTE.length) + Config.MESH_PALETTE.length) % Config.MESH_PALETTE.length];
+        // Поддержка 3-значных (#abc) и 6-значных (#aabbcc) hex.
+        function parseHex(c) {
+            var v = parseInt(c, 16);
+            return isNaN(v) ? 0 : (c.length === 1 ? v * 17 : v); // 'f' → 255, 'ff' → 255
+        }
         return [
-            parseInt(hex.substring(1, 3), 16),
-            parseInt(hex.substring(3, 5), 16),
-            parseInt(hex.substring(5, 7), 16)
+            parseHex(hex.substring(1, 3)),
+            parseHex(hex.substring(3, 5)),
+            parseHex(hex.substring(5, 7))
         ];
     }
 
@@ -483,21 +507,24 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
                     // глиф: с текстурой — символ текстуры (per-cell в fillPoly),
                     // без — по яркости света (градиент символов).
                     var baseGlyph = GlyphMap.byIntensity(Lighting.luminance(light));
-                    fillPoly(fb, proj.pts, baseGlyph, mesh.meshId || 0, faceUVs, [
+                    // материал × свет → неоновая цветокоррекция (насыщенность/
+                    // усиление/гамма): яркие цветные грани вместо тусклых.
+                    fillPoly(fb, proj.pts, baseGlyph, mesh.meshId || 0, faceUVs, neonGrade(
                         matRGB[0] / 255 * light.r,
                         matRGB[1] / 255 * light.g,
                         matRGB[2] / 255 * light.b
-                    ], faceTex);
+                    ), faceTex);
                 }
             }
         }
 
-        // pass 2: edges (outlines) — drawn on top with a stronger glyph;
-        // цвет = Config.EDGE_COLOR × свет на центроиде меша.
-        // showEdges=false (material/объект) → контурные линии не рисуются.
-        for (var mi = 0; mi < meshes.length; mi++) {
-            var m2 = meshes[mi];
-            if (m2.showEdges === false) continue;
+        // pass 2: edges (outlines) — отключены глобально (Config.SHOW_EDGES=false).
+        // Для включения: Config.SHOW_EDGES=true + showEdges=false на объектах,
+        // где рёбра не нужны.
+        if (Config.SHOW_EDGES !== false) {
+            for (var mi = 0; mi < meshes.length; mi++) {
+                var m2 = meshes[mi];
+                if (m2.showEdges === false) continue;
             var wm2 = m2.worldMatrix.elements;
             var v2 = m2.vertices;
 
@@ -530,16 +557,23 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
             }
             var edgeLight = Lighting.computeFaceLight(avgN.normalize(), centroidW, lights);
 
+            // подсветка контура цветом материала (0.6×свет + 0.4×материал):
+            // неоновая окантовка перенимает оттенок здания.
+            var mRGB = materialColor(m2);
+            var er = edgeColor[0] / 255 * edgeLight.r;
+            var eg = edgeColor[1] / 255 * edgeLight.g;
+            var eb = edgeColor[2] / 255 * edgeLight.b;
+            er = er * 0.6 + (mRGB[0] / 255) * 0.4;
+            eg = eg * 0.6 + (mRGB[1] / 255) * 0.4;
+            eb = eb * 0.6 + (mRGB[2] / 255) * 0.4;
+
             var edges = m2.getEdges();
             for (var ei = 0; ei < edges.length; ei++) {
                 var seg = Projection.projectEdge(wv[edges[ei][0]], wv[edges[ei][1]], viewMatrix, projMatrix, width, height, aspect);
                 if (seg) {
-                    drawLine(fb, seg[0], seg[1], edgeChar, m2.meshId || 0, [
-                        edgeColor[0] / 255 * edgeLight.r,
-                        edgeColor[1] / 255 * edgeLight.g,
-                        edgeColor[2] / 255 * edgeLight.b
-                    ]);
+                    drawLine(fb, seg[0], seg[1], edgeChar, m2.meshId || 0, neonGrade(er, eg, eb));
                 }
+            }
             }
         }
     }

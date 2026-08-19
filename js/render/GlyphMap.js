@@ -26,15 +26,19 @@ A3D.modules.GlyphMap = (function () {
             return Config.GLYPH_MAP.empty;
         },
 
-        // intensity: 0..1 → символ из градиента (для будущего освещения)
+        // intensity: 0..1 → символ из градиента (для будущего освещения).
+        // Минимальный порог (Config.MIN_GLYPH_INTENSITY): при яркости ниже порога
+        // рисуем RAMP[1] ('.'), а не RAMP[0] (' ') — тёмные объекты остаются видимыми.
         byIntensity: function (intensity) {
-            if (intensity <= 0) {
-                return RAMP[0];
+            var minI = (typeof Config.MIN_GLYPH_INTENSITY === 'number') ? Config.MIN_GLYPH_INTENSITY : 0;
+            if (intensity <= 0 || intensity < minI) {
+                return RAMP[1]; // '.' — минимально видимый глиф
             }
             if (intensity >= 1) {
                 return RAMP[RAMP.length - 1];
             }
             var idx = Math.round(intensity * (RAMP.length - 1));
+            if (idx < 1) idx = 1; // не ниже '.'
             return RAMP[idx];
         },
 
