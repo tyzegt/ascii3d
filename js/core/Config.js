@@ -16,7 +16,7 @@ A3D.modules.Config = (function () {
         LOOK_SPEED: 1.5,
         MAX_DT: 0.1,
         PITCH_LIMIT: MathUtils.degToRad(89),
-        DEFAULT_SCENE: 'city_block',
+        DEFAULT_SCENE: 'skyscraper',
         GLYPH_MAP: {
             base: '#',
             edge: '@',
@@ -25,7 +25,7 @@ A3D.modules.Config = (function () {
         // Освещение (этап B): глобальный заполняющий свет — доля белого,
         // добавляемая ко всем граням. 0.1 → тёмная сцена без источников
         // (~90% затемнения), но читаемая.
-        AMBIENT: 0.1,
+        AMBIENT: 0.25,
         // Коэффициент аттенюации point/spot-света: attenuation = 1/(1 + K*d^2).
         // K=0.08 → на d=5 затухание ~0.2 (заметный градиент в пределах сцены).
         POINT_ATTENUATION_K: 0.08,

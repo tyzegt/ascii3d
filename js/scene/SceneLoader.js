@@ -108,6 +108,12 @@ A3D.modules.SceneLoader = (function () {
             if (!mat) mat = {};
             mat.color = [data.color[0], data.color[1], data.color[2]];
         }
+        // showEdges: false → не рисовать рёбра контура (включая диагонали
+        // триангуляции); true/отсутствует → как раньше.
+        if (typeof data.showEdges === 'boolean') {
+            if (!mat) mat = {};
+            obj.showEdges = data.showEdges;
+        }
         if (mat) obj.material = mat;
     }
 

@@ -78,10 +78,14 @@ A3D.modules.Mesh = (function () {
     };
 
     // Edges as unique vertex-index pairs (for the outline pass in stage 5).
+    // showEdges=false → только внешние контурные рёбра: рёбро, которому
+    // принадлежат обе соседние грани одной группы (front/back/left/right/
+    // top/bottom), — это внутренняя диагональ триангуляции и она отбрасывается.
     Mesh.prototype.getEdges = function () {
         if (this._edges) return this._edges;
         var seen = {};
-        var edges = [];
+        var count = {};
+        var groupCount = {};
         for (var i = 0; i < this.faces.length; i++) {
             var idx = this.faces[i].indices;
             for (var k = 0; k < 3; k++) {
@@ -90,9 +94,35 @@ A3D.modules.Mesh = (function () {
                 var key = Math.min(p, q) + '_' + Math.max(p, q);
                 if (!seen[key]) {
                     seen[key] = true;
-                    edges.push([p, q]);
+                    count[key] = 0;
+                    groupCount[key] = {};
+                }
+                count[key]++;
+                if (count[key] > 2) continue; // >2 грани — не контур в любом случае
+                var g = this.faceGroupName(this.faces[i]);
+                if (g) {
+                    if (!groupCount[key][g]) groupCount[key][g] = 0;
+                    groupCount[key][g]++;
                 }
             }
+        }
+        var edges = [];
+        for (var k2 in seen) {
+            if (!Object.prototype.hasOwnProperty.call(seen, k2)) continue;
+            if (count[k2] > 2) continue;
+            if (this.showEdges === false) {
+                var gc = groupCount[k2];
+                var interior = false;
+                for (var g in gc) {
+                    if (Object.prototype.hasOwnProperty.call(gc, g) && gc[g] > 1) {
+                        interior = true;
+                        break;
+                    }
+                }
+                if (interior) continue;
+            }
+            var parts = k2.split('_');
+            edges.push([parseInt(parts[0], 10), parseInt(parts[1], 10)]);
         }
         this._edges = edges;
         return edges;

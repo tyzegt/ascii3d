@@ -494,8 +494,10 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
 
         // pass 2: edges (outlines) — drawn on top with a stronger glyph;
         // цвет = Config.EDGE_COLOR × свет на центроиде меша.
+        // showEdges=false (material/объект) → контурные линии не рисуются.
         for (var mi = 0; mi < meshes.length; mi++) {
             var m2 = meshes[mi];
+            if (m2.showEdges === false) continue;
             var wm2 = m2.worldMatrix.elements;
             var v2 = m2.vertices;
 
