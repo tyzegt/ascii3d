@@ -23,7 +23,7 @@ A3D.SceneRegistry.registerScene('skyscraper', {
             "children": [
                 // Насыщенные материалы: neоновая цветокоррекция (Config.NEON_*)
                 // делает грани яркими и цветными.
-                { "type": "cube", "name": "podium", "position": [0, 1.5, 0], "scale": [6, 3, 6], "color": [0.95, 0.4, 0.85], "textures": { "front": "brick", "back": "brick", "left": "brick", "right": "brick" }, "showEdges": false },
+                { "type": "cube", "name": "podium", "position": [0, 1.5, 0], "scale": [6, 3, 6], "color": [0.95, 0.4, 0.85], "textures": { "front": "test", "back": "test", "left": "test", "right": "test" }, "showEdges": false },
                 { "type": "cube", "name": "tower", "position": [0, 9, 0], "scale": [4, 12, 4], "color": [0.35, 0.85, 1], "textures": { "front": "window", "back": "window", "left": "window", "right": "window" }, "showEdges": false },
                 { "type": "cube", "name": "crown", "position": [0, 16.5, 0], "scale": [2.5, 3, 2.5], "color": [1, 0.8, 0.3], "textures": { "front": "brick", "back": "brick", "left": "brick", "right": "brick" }, "showEdges": false },
                 { "type": "pyramid", "name": "spire", "position": [0, 19.5, 0], "scale": [1.2, 3, 1.2], "color": [0.8, 0.4, 1], "showEdges": false }
