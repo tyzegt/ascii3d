@@ -161,6 +161,13 @@ test.html 34, scene_test.html 48, render_test.html 33 — все зелёные)
   `desert`, `character_demo`) получили источники света и текстуры на объектах;
   README/PLAN/ROADMAP обновлены. Проверено: все 3 тестовые страницы зелёные,
   консоль чиста, сцены рендерятся без артефактов, FPS стабилен.
+- **Tile-текстуры (Этап E) ✅** — `material.tile: [repeatU, repeatV]` «размножает»
+  ascii-паттерн на грани: UV масштабируются до проекции, семплинг nearest+wrap
+  (`Texture.sampleWrapChar`) — кирпичи/окна остаются чёткими при любом repeat.
+  Инлайн-сетки прямо в scene JSON (`textureData: { name, rows }` → `Texture.define`),
+  per-группа объект-спецификация `{ texture, tile }`. Встроенные `brickwall`/`brickface`,
+  сцена `bricktown`. Legacy (без `tile`) — билinear как в этапе C. Проверено:
+  render_test 187 ✓, bricktown без ошибок консоли.
 - **Прозрачность** — флаг `transparent` у объекта, сортировка back-to-front, правило
   смешивания символов (передний непрозрачнее → его символ).
 - **Кватернионы** (опц.) — замена Euler в `Object3D` для сложных вращений.

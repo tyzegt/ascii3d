@@ -4,7 +4,7 @@
 > Продолжает этап 7 (`ROADMAP.md`) и раздел 7 `PLAN.md`.
 > Все документы проекта — на русском; этот файл продолжает ту же конвенцию.
 >
-> Прогресс: **Этап A ✅** (per-cell цвет + UV в проекции), **Этап B ✅** (освещение), **Этап C ✅** (текстуры), **Этап D ✅** (интеграция, сцены, документация). Все этапы завершены.
+> Прогресс: **Этап A ✅** (per-cell цвет + UV в проекции), **Этап B ✅** (освещение), **Этап C ✅** (текстуры), **Этап D ✅** (интеграция, сцены, документация), **Этап E ✅** (tile-текстуры: repeat + nearest/wrap + инлайн-сетки в JSON). Все этапы завершены.
 
 ---
 
@@ -273,6 +273,54 @@ render_test 145 — все ✓; city_block/desert/light_demo/character_demo ре
 render_test 145 — все ✓; city_block/desert/character_demo/light_demo рендерятся без
 ошибок консоли, градиент глифов по граням от света + текстуры на объектах видны,
 FPS стабилен ~30; save/load сохраняет `lights` и материал).
+
+### Этап E — Tile-текстуры (repeat + nearest/wrap + инлайн)
+**Цель:** сложные ascii-паттерны (кирпичи, окна, плитка) «размножать» на грани:
+бесконечный repeat по UV, без bilinear-размытия, с авторством прямо в scene JSON.
+
+Проблема этапа C: UV зажат в [0,1] на грань → паттерн растягивается на всю стенку
+(кирпич на 12-метровой стене = один гигантский кирпич); bilinear-семплинг через
+интенсивность размывает сложный узор под углом/на расстоянии.
+
+Решение — **tile-режим** (включается полем `tile`):
+- UV масштабируются на `repeatU/repeatV` **до проекции** (`Rasterizer.scaleUVs`);
+  перспективно-корректная интерполяция работает с любыми u,v.
+- Семплинг **nearest + wrap** (`Texture.sampleWrapChar`): символ берётся напрямую из
+  сетки, u/v зацикливаются в [0,1) → паттерн повторяется бесконечно и остаётся чётким.
+- Legacy-материалы (без `tile`) сохраняют старое поведение: bilinear + clamp.
+
+Новые поля scene JSON объекта (mesh):
+```jsonc
+{
+  "type": "cube",
+  "texture": "brickwall", "tile": [4, 6],          // repeat ко всем граням
+  "textures": {                                      // per-группа: имя или объект
+    "front": { "texture": "window", "tile": [3, 4] }
+  },
+  "textureData": { "name": "cobbles",               // инлайн-сетка → Texture.define
+    "rows": ["o--o--o-", "--oo--oo"] }
+}
+```
+
+- [x] `Texture.js`: `sampleWrapChar` (nearest+wrap), `defineFromData` (инлайн → реестр),
+      встроенные `brickwall`/`brickface` (кирпичная кладка с бегунком).
+- [x] `Mesh.js`: `getFaceTexture(f)` → дескриптор `{ name, tile }`; конструктор собирает
+      `texture/textures/tile/color` из `params` (топ-уровневые поля JSON); `toJSON()`
+      сохраняет `tile` и object-specs по группам.
+- [x] `SceneLoader.js`: `applyMaterial` принимает строку/объект в `textures[group]`,
+      `tile` на уровне меша; `applyTextureData` регистрирует инлайн-сетки.
+- [x] `Rasterizer.js`: `scaleUVs`, дескриптор текстуры грани + выбор семплера
+      (wrap vs bilinear) в `fillPoly`/`fillTri`; legacy bare-texture путь сохранён.
+- [x] Сцена `scenes/bricktown.js` (в `index.html`): кирпичные дома с tile, инлайн-
+      «мощение» на земле, башня с высоким vertical repeat.
+- [x] Тесты: wrap-семплинг (u=1→u=0, отрицательные), `defineFromData`, `scaleUVs`,
+      `getFaceTexture` (mesh-level + per-group object-spec + legacy строка), fillPoly с
+      wrap (оба символа чекинера), SceneLoader round-trip (`tile`, object-specs,
+      `textureData`) + `toJSON`.
+
+**Приёмка:** ✅ (http://ascii3d.local.int/: test 34 / scene_test 83 / render_test 187 —
+все ✓; bricktown рендерится без ошибок консоли: кирпичная кладка повторяется по высоте,
+инлайн-паттерны на земле/фасадах, legacy-сцены (skyscraper) без регрессии).
 
 ---
 

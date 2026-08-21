@@ -67,6 +67,7 @@ A3D.modules.SceneLoader = (function () {
         if (!obj) return null;
 
         obj.name = (typeof data.name === 'string') ? data.name : '';
+        applyTextureData(data, index);
         applyTransform(obj, data, index);
         applyMaterial(obj, data, index);
 
@@ -89,20 +90,54 @@ A3D.modules.SceneLoader = (function () {
         }
     }
 
+    // Инлайн-текстура из JSON: data.textureData = { name?, rows: [...] }.
+    // Регистрирует ascii-сетку в Texture под именем (name || data.texture),
+    // чтобы материал мог ссылаться на неё как на обычную именованную текстуру.
+    function applyTextureData(data, index) {
+        if (!data.textureData || typeof data.textureData !== 'object') return;
+        var Texture = A3D.modules.Texture;
+        if (!Texture || !Texture.defineFromData) return;
+        var fallbackName = (typeof data.texture === 'string') ? data.texture : null;
+        var tex = Texture.defineFromData(data.textureData, fallbackName);
+        if (!tex) {
+            Debug.warn('SceneLoader', 'object #' + index + ': textureData not registered');
+        }
+    }
+
+    // Значение текстуры в JSON: строка-имя или объект { texture, tile }.
+    function normalizeTexSpec(v) {
+        if (typeof v === 'string') return v;
+        if (v && typeof v === 'object' && typeof v.texture === 'string') {
+            var spec = { texture: v.texture };
+            if (Array.isArray(v.tile) && v.tile.length >= 2) {
+                spec.tile = [v.tile[0], v.tile[1]];
+            }
+            return spec;
+        }
+        return null;
+    }
+
     // Материал (этап C): texture/textures/color из JSON объекта → obj.material.
     function applyMaterial(obj, data, index) {
         if (!obj.isMesh) return;
         var mat = null;
         if (typeof data.texture === 'string') {
             mat = { texture: data.texture };
+            if (Array.isArray(data.tile) && data.tile.length >= 2) {
+                mat.tile = [data.tile[0], data.tile[1]];
+            }
         } else if (data.textures && typeof data.textures === 'object' && !Array.isArray(data.textures)) {
-            mat = { textures: {} };
+            var any = false;
             for (var g in data.textures) {
-                if (Object.prototype.hasOwnProperty.call(data.textures, g) &&
-                    typeof data.textures[g] === 'string') {
-                    mat.textures[g] = data.textures[g];
+                if (!Object.prototype.hasOwnProperty.call(data.textures, g)) continue;
+                var spec = normalizeTexSpec(data.textures[g]);
+                if (spec) {
+                    if (!mat) mat = { textures: {} };
+                    mat.textures[g] = spec;
+                    any = true;
                 }
             }
+            if (!any && mat === null) mat = null;
         }
         if (Array.isArray(data.color) && data.color.length >= 3) {
             if (!mat) mat = {};

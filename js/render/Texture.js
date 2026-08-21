@@ -1,4 +1,4 @@
-window.A3D = window.A3D || {};
+    window.A3D = window.A3D || {};
 A3D.modules = A3D.modules || {};
 
 // Текстуры (этап C): ascii-текстура = сетка символов w×h + именованный реестр.
@@ -62,6 +62,31 @@ A3D.modules.Texture = (function () {
 
     function get(name) {
         return (name && typeof name === 'string') ? (registry[name] || null) : null;
+    }
+
+    // Nearest-семплинг символа в точке (u,v) с WRAP (tile/repeat): u=1.0 даёт
+    // тот же символ, что u=0.0 — паттерн «размножается» бесконечно по UV.
+    // Возвращает символ текстуры напрямую (без bilinear-сглаживания), поэтому
+    // сложные паттерны (кирпичи, окна) не размываются под углом и на расстоянии.
+    function sampleWrapChar(tex, u, v) {
+        if (!tex || !tex.cells) return ' ';
+        var w = tex.w, h = tex.h;
+        // wrap в [0,1): отрицательные координаты тоже зацикливаются
+        var fu = u - Math.floor(u);
+        var fv = v - Math.floor(v);
+        var x = Math.floor(fu * w);
+        var y = Math.floor(fv * h);
+        if (x >= w) x = w - 1;
+        if (y >= h) y = h - 1;
+        return tex.cells[y * w + x];
+    }
+
+    // Билinear-семплинг символа с clamp: интенсивность интерполируется между
+    // соседями, результат remap'ится в RAMP через GlyphMap. Используется для
+    // legacy-материалов (без tile) — старое поведение сохранено.
+    function sampleWrapGlyph(tex, u, v) {
+        var GlyphMap = A3D.modules.GlyphMap;
+        return GlyphMap ? GlyphMap.byIntensity(sample(tex, u, v)) : ' ';
     }
 
     // Bilinear семплинг интенсивности в точке (u,v) ∈ [0,1]² с clamp.
@@ -211,6 +236,29 @@ A3D.modules.Texture = (function () {
         }
     }
 
+    // Инлайн-текстура из scene JSON: { name, rows } → define() + повторное имя.
+    // data.name — имя в реестре; если не задано, используется data.texture (имя,
+    // указанное в материале), чтобы текстура была доступна по тому же имени.
+    function defineFromData(data, fallbackName) {
+        if (!data || typeof data !== 'object') return null;
+        var rows = Array.isArray(data.rows) ? data.rows : null;
+        if (!rows || rows.length === 0) {
+            Debug.warn('Texture', 'defineFromData: no rows, skipped');
+            return null;
+        }
+        var w = 0;
+        for (var i = 0; i < rows.length; i++) {
+            if (typeof rows[i] === 'string' && rows[i].length > w) w = rows[i].length;
+        }
+        if (!w) return null;
+        var name = (typeof data.name === 'string' && data.name) ? data.name : fallbackName;
+        if (!name || typeof name !== 'string') {
+            Debug.warn('Texture', 'defineFromData: no name, skipped');
+            return null;
+        }
+        return define(name, w, rows.length, rows);
+    }
+
     // Именованные текстуры по умолчанию (ascii-паттерны).
     define('brick', 8, 4, [
         '########',
@@ -247,11 +295,41 @@ A3D.modules.Texture = (function () {
         '.~~...~.'
     ]);
 
+    define('test', 8, 4, [
+        '--------',
+        '|00||00|',
+        '|00||00|',
+        '--------'
+    ]);
+
+    // Кирпичная кладка: два сдвинутых ряда (бегунок), '#' = кирпич, '.' = шов.
+    // Для tile-режима: 1 тайл = 2 ряда кирпича; вертикальный repeat даёт
+    // бесконечную кладку по высоте здания.
+    define('brickwall', 8, 4, [
+        '########',
+        '#..#...#',
+        '########',
+        '.#..#...'
+    ]);
+
+    // Кирпичи с «лицом»: каждый кирпич — два символа плотности + швы.
+    define('brickface', 12, 6, [
+        '@#@#.@#@#@#.',
+        '@#@#.@#@#@#.',
+        '............',
+        '.@#@#@#.@#..',
+        '.@#@#@#.@#..',
+        '............'
+    ]);
+
     return {
         registry: registry,
         define: define,
         get: get,
         sample: sample,
+        sampleWrapChar: sampleWrapChar,
+        sampleWrapGlyph: sampleWrapGlyph,
+        defineFromData: defineFromData,
         uvForFaceGroup: uvForFaceGroup,
         generateFaceUVs: generateFaceUVs,
         glyphIntensity: glyphIntensity

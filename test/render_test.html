@@ -872,6 +872,117 @@
             var cubeG = new Cube({ material: { texture: 'grass', textures: { front: 'window' } } });
             assertTrue('per-group overrides', cubeG.getFaceTextureName(cubeG.faces[4]) === 'window'); // front is face 4
             assertTrue('non-overridden uses default', cubeG.getFaceTextureName(cubeG.faces[0]) === 'grass');
+
+            // ---------- Tile-режим (этап D): wrap-семплинг + repeat ----------
+
+            // sampleWrapChar: nearest + wrap — u=1.0 даёт тот же символ, что u=0.0
+            var checker2 = Texture.define('wrapchk', 2, 2, ['#.', '.#']);
+            assertTrue('wrap(0.0) = #', Texture.sampleWrapChar(checker2, 0.0, 0.0) === '#');
+            assertTrue('wrap(1.0) repeats (u=1 -> u=0)', Texture.sampleWrapChar(checker2, 1.0, 0.0) === '#');
+            assertTrue('wrap(2.5) repeats (u=2.5 -> u=0.5)', Texture.sampleWrapChar(checker2, 2.5, 0.0) === '.');
+            assertTrue('wrap negative wraps', Texture.sampleWrapChar(checker2, -0.5, 0.0) === '.'); // -0.5 → 0.5 → cell (1,0)='.'
+            assertTrue('wrap v wraps', Texture.sampleWrapChar(checker2, 0.0, 1.0) === '#');
+
+            // built-in tiling bricks exist
+            assertTrue('built-in brickwall exists', !!Texture.get('brickwall'));
+            assertTrue('built-in brickface exists', !!Texture.get('brickface'));
+
+            // defineFromData: inline texture from scene JSON
+            var inlineTex = Texture.defineFromData({ name: 'inl', rows: ['ab', 'cd'] }, null);
+            assertTrue('defineFromData registers texture', !!inlineTex && inlineTex.w === 2 && inlineTex.h === 2);
+            assertTrue('defineFromData sampleable', Texture.sampleWrapChar(inlineTex, 0.25, 0.25) === 'a');
+            assertTrue('defineFromData fallback name', !!Texture.defineFromData({ rows: ['xx'] }, 'fbname') && !!Texture.get('fbname'));
+            assertTrue('defineFromData bad input -> null', Texture.defineFromData(null, 'x') === null);
+            assertTrue('defineFromData no rows -> null', Texture.defineFromData({ name: 'n' }, 'n') === null);
+
+            // scaleUVs: UV масштабируются на repeat (tile) — f.uv не мутируется
+            var uv6 = [0, 0, 1, 0, 0.5, 1];
+            var scaled = Rasterizer.scaleUVs(uv6, 3, 2);
+            assertTrue('scaleUVs returns new array', scaled !== uv6);
+            assertClose('scaleUVs u*3 v*2 [0]', scaled[0], 0, 1e-9);
+            assertClose('scaleUVs u*3 v*2 [1]', scaled[1], 0, 1e-9);
+            assertClose('scaleUVs u*3 v*2 [2]', scaled[2], 3, 1e-9);
+            assertClose('scaleUVs u*3 v*2 [5]', scaled[5], 2, 1e-9);
+            assertClose('scaleUVs source untouched', uv6[2], 1, 1e-9);
+
+            // getFaceTexture: descriptor { name, tile }
+            var cubeTile = new Cube({ material: { texture: 'brickwall', tile: [4, 6] } });
+            var specT = cubeTile.getFaceTexture(cubeTile.faces[0]);
+            assertTrue('getFaceTexture mesh-level tile', !!specT && specT.name === 'brickwall' && specT.tile && specT.tile[0] === 4 && specT.tile[1] === 6);
+            var cubePer = new Cube({ material: { textures: { front: { texture: 'window', tile: [2, 3] } } } });
+            var specF = cubePer.getFaceTexture(cubePer.faces[4]); // front is face 4
+            assertTrue('getFaceTexture per-group object spec', !!specF && specF.name === 'window' && specF.tile[0] === 2);
+            var specOther = cubePer.getFaceTexture(cubePer.faces[0]); // back — no texture
+            assertTrue('getFaceTexture null when absent', specOther === null);
+            // legacy string specs still work
+            var specStr = cubeG.getFaceTexture(cubeG.faces[4]);
+            assertTrue('getFaceTexture string spec (legacy)', !!specStr && specStr.name === 'window' && specStr.tile === null);
+
+            // fillPoly with wrap texture: repeated pattern -> varied glyphs,
+            // and nearest sampling keeps the ORIGINAL texture chars (no remap).
+            var fbW = new FrameBuffer();
+            fbW.resize(40, 20);
+            fbW.clear();
+            // UVs spanning 2 repeats of the 2x2 checker -> all 4 cells hit
+            var wPts = [
+                { x: 10, y: 5, invW: 0.2 },
+                { x: 30, y: 5, invW: 0.2 },
+                { x: 20, y: 15, invW: 0.2 }
+            ];
+            var wUVs = [0, 0, 2, 0, 1, 2]; // 2 repeats in u, 2 in v
+            Rasterizer.fillPoly(fbW, wPts, 'Z', 0, wUVs, null, { tex: checker2, wrap: true });
+            var wChars = {};
+            for (var wi = 0; wi < fbW.chars.length; wi++) {
+                if (fbW.chars[wi] !== ' ') wChars[fbW.chars[wi]] = true;
+            }
+            assertTrue('wrap fillPoly produces both checker chars', !!wChars['#'] && !!wChars['.'], JSON.stringify(wChars));
+
+            // legacy bare-texture path in fillPoly still works (bilinear)
+            var fbL = new FrameBuffer();
+            fbL.resize(40, 20);
+            fbL.clear();
+            Rasterizer.fillPoly(fbL, wPts, 'Z', 0, [0, 0, 1, 0, 0.5, 1], null, checker2);
+            var lChars = {};
+            for (var li = 0; li < fbL.chars.length; li++) {
+                if (fbL.chars[li] !== ' ') lChars[fbL.chars[li]] = true;
+            }
+            assertTrue('legacy bare-texture fillPoly still works', Object.keys(lChars).length >= 1, JSON.stringify(lChars));
+
+            // SceneLoader: tile + textureData round-trip through applyMaterial.
+            // Регистрируем тип 'cube' (в тесте main.js не грузился).
+            A3D.SceneRegistry.register('cube', function (p) { return new Cube(p); });
+            var SL = A3D.modules.SceneLoader;
+            var loaded = SL.load({
+                name: 'tiletest',
+                objects: [
+                    {
+                        type: 'cube',
+                        textureData: { name: 'sltex', rows: ['##', '..'] },
+                        textures: { front: { texture: 'sltex', tile: [3, 2] } },
+                        color: [1, 0, 0]
+                    },
+                    { type: 'cube', texture: 'sltex', tile: [5, 5], color: [0, 1, 0] }
+                ]
+            });
+            assertTrue('loader scene has 2 objects', loaded.objects.length === 2);
+            var lo1 = loaded.objects[0];
+            assertTrue('loader registered inline texture', !!Texture.get('sltex'));
+            assertTrue('loader per-group tile spec',
+                !!lo1.material && !!lo1.material.textures &&
+                typeof lo1.material.textures.front === 'object' &&
+                lo1.material.textures.front.texture === 'sltex' &&
+                lo1.material.textures.front.tile[0] === 3);
+            var lo2 = loaded.objects[1];
+            assertTrue('loader mesh-level tile', !!lo2.material && lo2.material.texture === 'sltex' && lo2.material.tile[0] === 5);
+
+            // toJSON round-trip preserves tile + object specs (material — на вершине)
+            var j1 = lo1.toJSON();
+            assertTrue('toJSON keeps per-group object spec',
+                j1.material && j1.material.textures && j1.material.textures.front &&
+                j1.material.textures.front.texture === 'sltex' && j1.material.textures.front.tile[0] === 3);
+            var j2 = lo2.toJSON();
+            assertTrue('toJSON keeps mesh-level tile',
+                j2.material && j2.material.texture === 'sltex' && j2.material.tile && j2.material.tile[0] === 5);
         }
 
         testClipNear();

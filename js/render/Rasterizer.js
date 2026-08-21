@@ -59,6 +59,7 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
     // regardless of how extreme the vertex coordinates are (e.g. a near-clipped
     // floor vertex projecting to x = ±80000). Returns nothing; writes cells via
     // fb.setCell / setCellColor using the z-buffer.
+    // tex — { tex, wrap }: текстура + режим семплинга (wrap → nearest+repeat).
     function fillTri(fb, a, b, c, ch, meshId, uvA, uvB, uvC, color, tex) {
         var minX = a.x < b.x ? (a.x < c.x ? a.x : c.x) : (b.x < c.x ? b.x : c.x);
         var maxX = a.x > b.x ? (a.x > c.x ? a.x : c.x) : (b.x > c.x ? b.x : c.x);
@@ -113,7 +114,8 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
                 if (tex) {
                     var uvPt = sampleUV(uvGrads, grad, xc, yc);
                     if (uvPt) {
-                        cellCh = textureGlyph(tex, uvPt.u, uvPt.v);
+                        cellCh = tex.wrap ? textureGlyphWrap(tex.tex, uvPt.u, uvPt.v)
+                                          : textureGlyph(tex.tex, uvPt.u, uvPt.v);
                     }
                 }
                 if (color) {
@@ -135,11 +137,13 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
         // even-odd scanline is fragile; triangles are always simple, so this is
         // robust at any camera angle. UVs are passed per-vertex through the fan.
         var hasUV = !!(uvs && uvs.length >= n * 2);
+        // tex — { tex, wrap } (новый API) или bare текстура (легаси, bilinear).
+        var texInfo = tex ? (tex.tex ? tex : { tex: tex, wrap: false }) : null;
         for (var i = 1; i < n - 1; i++) {
             var uvA = hasUV ? [uvs[0], uvs[1]] : [0, 0];
             var uvB = hasUV ? [uvs[i * 2], uvs[i * 2 + 1]] : [0, 0];
             var uvC = hasUV ? [uvs[(i + 1) * 2], uvs[(i + 1) * 2 + 1]] : [0, 0];
-            fillTri(fb, pts[0], pts[i], pts[i + 1], ch, meshId, uvA, uvB, uvC, color, tex);
+            fillTri(fb, pts[0], pts[i], pts[i + 1], ch, meshId, uvA, uvB, uvC, color, texInfo);
         }
     }
 
@@ -147,6 +151,12 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
     function textureGlyph(tex, u, v) {
         var intensity = Texture.sample(tex, u, v);
         return GlyphMap.byIntensity(intensity);
+    }
+
+    // Tile-режим: nearest-символ с wrap — паттерн размножается по UV без
+    // bilinear-размытия (кирпичи/окна остаются чёткими под любым углом).
+    function textureGlyphWrap(tex, u, v) {
+        return Texture.sampleWrapChar(tex, u, v);
     }
 
     // Строит перспективно-корректные градиенты u/w и v/w для полигона.
@@ -163,6 +173,17 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
             vwPts[i] = { x: pts[i].x, y: pts[i].y, val: vVal * iW };
         }
         return { uw: solveGradient3(uwPts), vw: solveGradient3(vwPts) };
+    }
+
+    // Масштабирует UV [u0,v0,u1,v1,u2,v2] на repeatU/repeatV (tile-режим).
+    // Возвращает новый массив; исходный f.uv не мутируется.
+    function scaleUVs(uvs, ru, rv) {
+        var out = new Array(6);
+        for (var i = 0; i < 6; i += 2) {
+            out[i] = uvs[i] * ru;
+            out[i + 1] = uvs[i + 1] * rv;
+        }
+        return out;
     }
 
     // Восстанавливает u,v в точке (xc,yc) экрана по градиентам 1/w, u/w, v/w.
@@ -479,8 +500,39 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
                 // face normal in camera space (for back-face cull)
                 var normalCam = Projection.normalToCamera(f.normal, viewMatrix);
 
-                // UV угла грани (этап C: примитивы генерируют f.uv)
+                // текстура грани (этап C): дескриптор { name, tile } из material
+                var faceTexInfo = null;
                 var faceUVs = (f && f.uv) ? f.uv : null;
+                if (mesh.getFaceTexture) {
+                    var texSpec = mesh.getFaceTexture(f);
+                    if (texSpec && texSpec.name) {
+                        if (!texCache.hasOwnProperty(texSpec.name)) {
+                            texCache[texSpec.name] = Texture ? Texture.get(texSpec.name) : null;
+                        }
+                        var faceTexObj = texCache[texSpec.name];
+                        if (faceTexObj) {
+                            // tile: [repeatU, repeatV] — размножение паттерна по UV.
+                            // UV масштабируются ДО проекции: перспективно-корректная
+                            // интерполяция работает с любыми значениями u,v, а wrap
+                            // в семплере зацикливает паттерн бесконечно.
+                            if (faceUVs && texSpec.tile) {
+                                var tu = texSpec.tile[0] > 0 ? texSpec.tile[0] : 1;
+                                var tv = texSpec.tile[1] > 0 ? texSpec.tile[1] : 1;
+                                faceUVs = scaleUVs(faceUVs, tu, tv);
+                            }
+                            faceTexInfo = { tex: faceTexObj, wrap: !!texSpec.tile };
+                        }
+                    }
+                } else if (mesh.getFaceTextureName) {
+                    var legacyName = mesh.getFaceTextureName(f);
+                    if (legacyName) {
+                        if (!texCache.hasOwnProperty(legacyName)) {
+                            texCache[legacyName] = Texture ? Texture.get(legacyName) : null;
+                        }
+                        faceTexInfo = texCache[legacyName];
+                    }
+                }
+
                 var proj = Projection.projectFace(tri, faceUVs, normalCam, viewMatrix, projMatrix, width, height, aspect);
                 if (proj) {
                     // мировая нормаль + центроид грани → свет на грань
@@ -492,18 +544,6 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
                     );
                     var light = Lighting.computeFaceLight(nWorld || f.normal, centroid, lights);
 
-                    // текстура грани (этап C): имя из material → объект
-                    var faceTex = null;
-                    if (mesh.getFaceTextureName) {
-                        var texName = mesh.getFaceTextureName(f);
-                        if (texName) {
-                            if (!texCache.hasOwnProperty(texName)) {
-                                texCache[texName] = Texture ? Texture.get(texName) : null;
-                            }
-                            faceTex = texCache[texName];
-                        }
-                    }
-
                     // глиф: с текстурой — символ текстуры (per-cell в fillPoly),
                     // без — по яркости света (градиент символов).
                     var baseGlyph = GlyphMap.byIntensity(Lighting.luminance(light));
@@ -513,7 +553,7 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
                         matRGB[0] / 255 * light.r,
                         matRGB[1] / 255 * light.g,
                         matRGB[2] / 255 * light.b
-                    ), faceTex);
+                    ), faceTexInfo);
                 }
             }
         }
@@ -586,6 +626,7 @@ var Rasterizer = (A3D.modules.Rasterizer = (function () {
         buildUVGradients: buildUVGradients,
         sampleUV: sampleUV,
         boxInFrustum: boxInFrustum,
-        getBoundingBox: getBoundingBox
+        getBoundingBox: getBoundingBox,
+        scaleUVs: scaleUVs
     };
 })());

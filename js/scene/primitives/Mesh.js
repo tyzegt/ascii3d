@@ -9,13 +9,24 @@ A3D.modules.Mesh = (function () {
 
     // Base mesh: vertices (Vec3[]), faces ({indices:[i0,i1,i2], normal, uv?}).
     // Winding is CCW seen from outside so computed normals point outward.
-    // material (опц., этап C): { texture: 'name', textures: {group:'name'}, color: [r,g,b] }.
+    // material (опц., этап C): { texture: 'name', textures: {group:'name'|spec},
+    // tile: [tu,tv], color: [r,g,b] }. SceneLoader кладёт эти поля в params —
+    // конструктор собирает их в this.material (топ-уровневые поля JSON объекта).
     function Mesh(params) {
         Object3D.call(this, params);
         this.isMesh = true;
         this.vertices = [];
         this.faces = [];
-        this.material = (params && params.material && typeof params.material === 'object') ? params.material : null;
+        var mat = (params && params.material && typeof params.material === 'object') ? params.material : null;
+        if (!mat && params && typeof params === 'object') {
+            var m2 = {};
+            if (typeof params.texture === 'string') m2.texture = params.texture;
+            if (params.textures && typeof params.textures === 'object' && !Array.isArray(params.textures)) m2.textures = params.textures;
+            if (Array.isArray(params.tile) && params.tile.length >= 2) m2.tile = [params.tile[0], params.tile[1]];
+            if (Array.isArray(params.color) && params.color.length >= 3) m2.color = [params.color[0], params.color[1], params.color[2]];
+            if (m2.texture || m2.textures || m2.tile || m2.color) mat = m2;
+        }
+        this.material = mat;
         this.computeNormals();
     }
 
@@ -67,15 +78,36 @@ A3D.modules.Mesh = (function () {
 
     // Текстура для грани: material.textures[groupName] || material.texture || null.
     Mesh.prototype.getFaceTextureName = function (f) {
+        var spec = this.getFaceTexture(f);
+        return spec ? spec.name : null;
+    };
+
+    // Дескриптор текстуры грани (tile-режим): { name, tile: [tu, tv] | null }.
+    // Приоритет: material.textures[groupName] → material.texture. Значение в
+    // textures/group может быть строкой-именем или объектом
+    // { texture: 'name', tile: [tu, tv] } (tile — повтор паттерна по u/v).
+    Mesh.prototype.getFaceTexture = function (f) {
         var mat = this.material;
         if (!mat) return null;
+        var spec = null;
         var groupName = this.faceGroupName(f);
         if (mat.textures && typeof mat.textures === 'object' && mat.textures[groupName]) {
-            return mat.textures[groupName];
+            spec = normalizeTexSpec(mat.textures[groupName]);
         }
-        if (typeof mat.texture === 'string') return mat.texture;
-        return null;
+        if (!spec && typeof mat.texture === 'string') {
+            spec = normalizeTexSpec({ texture: mat.texture, tile: mat.tile });
+        }
+        return spec;
     };
+
+    function normalizeTexSpec(v) {
+        if (typeof v === 'string') return { name: v, tile: null };
+        if (v && typeof v === 'object' && typeof v.texture === 'string') {
+            var tu = (Array.isArray(v.tile) && v.tile.length >= 2) ? [v.tile[0], v.tile[1]] : null;
+            return { name: v.texture, tile: tu };
+        }
+        return null;
+    }
 
     // Edges as unique vertex-index pairs (for the outline pass in stage 5).
     // showEdges=false → только внешние контурные рёбра: рёбро, которому
@@ -149,10 +181,13 @@ A3D.modules.Mesh = (function () {
                     }
                 }
             }
+            if (Array.isArray(this.material.tile) && this.material.tile.length >= 2) {
+                m.tile = [this.material.tile[0], this.material.tile[1]];
+            }
             if (Array.isArray(this.material.color) && this.material.color.length >= 3) {
                 m.color = [this.material.color[0], this.material.color[1], this.material.color[2]];
             }
-            if (m.texture || m.textures || m.color) base.material = m;
+            if (m.texture || m.textures || m.tile || m.color) base.material = m;
         }
         return base;
     };

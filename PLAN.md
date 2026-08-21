@@ -188,10 +188,14 @@ ascii3d/
   материал × свет (per-cell). Источники — в `scene.lights` (round-trip через
   toJSON/load). `utils/Colors.js` — устаревшая обёртка.
 - **Текстуры** ✅: `js/render/Texture.js` — именованный реестр ascii-текстур
-  (`brick`, `checker`, `window`, `grass`, `water`), `sample` (bilinear + clamp),
+  (`brick`, `checker`, `window`, `grass`, `water`, `brickwall`, `brickface`),
+  `sample` (bilinear + clamp, legacy) и `sampleWrapChar` (nearest + wrap, tile-режим),
   генерация UV на углах граней (`faces[i].uv`). Rasterizer интерполирует
   `u/w`,`v/w`,`1/w` → перспективно-корректные `u,v` → символ текстуры. Привязка:
-  `"texture": "name"` (все грани) или `"textures": {группа: "name"}`.
+  `"texture": "name"` (все грани) или `"textures": {группа: "name" | {texture, tile}}`.
+  **Tile-режим**: `"tile": [repeatU, repeatV]` — паттерн размножается на грани
+  (UV × repeat до проекции, nearest+wrap семплинг без размытия); инлайн-сетки в JSON:
+  `"textureData": { name, rows }` → `Texture.define`. Сцена-демо: `bricktown`.
 - **Кватернионы**: замена Euler в `Object3D` для сложных вращений.
 - **LOD**: снижение сегментов сферы/цилиндра с расстоянием.
 - **Пикер объектов**: raycast по линиям/треугольникам.
@@ -350,6 +354,8 @@ MVP (пункты 1–14) завершён — см. статус в `ROADMAP.md
 16. ⏳ **Прозрачность** — флаг `transparent`, сортировка back-to-front, смешивание символов.
 17. ✅ **Текстуры** — `js/render/Texture.js`: именованный реестр, UV на углах
     граней, перспективно-корректный семплинг. Интегрировано в сцены.
+    **Tile-режим**: `tile: [u,v]` (repeat + nearest/wrap), инлайн-сетки `textureData`,
+    сцена `bricktown`.
 18. ⏳ (опц.) **Кватернионы / LOD / пикер объектов (raycast)**.
 
 ---
